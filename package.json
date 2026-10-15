@@ -1,0 +1,40 @@
+{
+  "name": "shopkart",
+  "version": "1.0.0",
+  "description": "Full-stack E-Commerce application with Express, MongoDB Atlas, React, and Razorpay payment gateway",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "seed": "node seed.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "ecommerce",
+    "mern-stack",
+    "razorpay",
+    "react",
+    "express",
+    "mongodb",
+    "payment-gateway"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Ramu-9/SmartKart.git"
+  },
+  "author": "Ramu",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.9.4",
+    "razorpay": "^2.9.8"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
