@@ -42,7 +42,7 @@ const OrderDetails = () => {
       const response = await orderApi.patch(`/${id}/status`, { status: newStatus });
       setOrder(response.data.order);
     } catch (err) {
-      alert(err.response?.data?.message || 'Failed to update order status');
+      setError(err.response?.data?.message || 'Failed to update order status');
     } finally {
       setUpdatingStatus(false);
     }
@@ -159,8 +159,14 @@ const OrderDetails = () => {
           <div className="order-cost-breakdown">
             <div className="breakdown-row">
               <span>Subtotal:</span>
-              <span>₹{(order.totalAmount || 0).toLocaleString('en-IN')}</span>
+              <span>₹{(order.subtotalAmount || order.totalAmount || 0).toLocaleString('en-IN')}</span>
             </div>
+            {order.discountAmount > 0 && (
+              <div className="breakdown-row discount-summary-row">
+                <span>Negotiated Discount ({order.discountPercent || 0}%):</span>
+                <span className="discount-value">−₹{(order.discountAmount || 0).toLocaleString('en-IN')}</span>
+              </div>
+            )}
             <div className="breakdown-row">
               <span>Delivery Fee:</span>
               <span className="shipping-free">FREE</span>

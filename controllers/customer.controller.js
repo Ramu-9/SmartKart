@@ -1,11 +1,13 @@
 const Customer = require('../models/customer.model');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
+const mongoose = require('mongoose');
+const inMemoryStore = require('../inMemoryStore');
 const generateToken = require('../utils/generateToken');
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax'
+  secure: process.env.NODE_ENV !== 'test',
+  sameSite: process.env.NODE_ENV !== 'test' ? 'none' : 'lax'
 };
 
 exports.register = async (req, res) => {
@@ -22,21 +24,45 @@ exports.register = async (req, res) => {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    if (await Customer.findOne({ email: normalizedEmail })) {
+    let existingCustomer = null;
+    if (mongoose.connection.readyState === 1) {
+      existingCustomer = await Customer.findOne({ email: normalizedEmail });
+    } else {
+      existingCustomer = inMemoryStore.findCustomerByEmail(normalizedEmail);
+    }
+
+    if (existingCustomer) {
       return res.status(409).json({ message: 'Email already registered' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
-    const customer = await Customer.create({
-      fullName,
-      email: normalizedEmail,
-      password: hashedPassword,
-      phone
+    let customer;
+    if (mongoose.connection.readyState === 1) {
+      customer = await Customer.create({
+        fullName,
+        email: normalizedEmail,
+        password: hashedPassword,
+        phone
+      });
+    } else {
+      customer = inMemoryStore.createCustomer({
+        fullName,
+        email: normalizedEmail,
+        password: hashedPassword,
+        phone
+      });
+    }
+
+    const token = generateToken(customer._id);
+    res.cookie('token', token, {
+      ...COOKIE_OPTIONS,
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
     res.status(201).json({
       success: true,
       message: 'Customer registered successfully',
+      token,
       customer: {
         _id: customer._id,
         fullName: customer.fullName,
@@ -62,7 +88,13 @@ exports.login = async (req, res) => {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    const customer = await Customer.findOne({ email: normalizedEmail });
+    let customer = null;
+    if (mongoose.connection.readyState === 1) {
+      customer = await Customer.findOne({ email: normalizedEmail });
+    } else {
+      customer = inMemoryStore.findCustomerByEmail(normalizedEmail);
+    }
+
     if (!customer || !(await bcrypt.compare(password, customer.password))) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -76,7 +108,14 @@ exports.login = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Login successful'
+      message: 'Login successful',
+      token,
+      customer: {
+        _id: customer._id,
+        fullName: customer.fullName,
+        email: customer.email,
+        phone: customer.phone
+      }
     });
   } catch (error) {
     res.status(500).json({ message: 'Server error' });

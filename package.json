@@ -5,10 +5,16 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js",
+    "dev": "npm run build:frontend && node index.js",
+    "build:frontend": "npm --prefix SmartKart-Frontend run build",
+    "build": "npm run build:frontend",
+    "lint": "npm --prefix SmartKart-Frontend run lint",
     "seed": "node seed.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test tests/smartkart2.test.js"
   },
+  "workspaces": [
+    "SmartKart-Frontend"
+  ],
   "keywords": [
     "ecommerce",
     "mern-stack",
@@ -26,7 +32,8 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
-    "bcrypt": "^6.0.0",
+    "@google/genai": "^2.32.0",
+    "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",

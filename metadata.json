@@ -1,0 +1,7 @@
+{
+  "name": "SmartKart",
+  "description": "Full-stack E-Commerce application with Express, React, and Razorpay payment gateway integration",
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

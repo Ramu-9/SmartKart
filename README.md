@@ -1,310 +1,170 @@
-# 🛒 ShopKart — Modern Full-Stack E-Commerce & Payment Platform
+# SmartKart — Goal-Driven E-Commerce & Buyer Protection Platform
 
-[![Node.js](https://img.shields.io/badge/Node.js-18+-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Express.js](https://img.shields.io/badge/Express.js-5.x-000000?style=for-the-badge&logo=express&logoColor=white)](https://expressjs.com/)
-[![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
-[![Vite](https://img.shields.io/badge/Vite-8.x-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
-[![MongoDB](https://img.shields.io/badge/MongoDB%20Atlas-Cloud-47A248?style=for-the-badge&logo=mongodb&logoColor=white)](https://www.mongodb.com/atlas)
-[![Razorpay](https://img.shields.io/badge/Razorpay-Payment%20Gateway-0C2340?style=for-the-badge&logo=razorpay&logoColor=0288D1)](https://razorpay.com/)
-[![JWT](https://img.shields.io/badge/JWT-Secure%20Auth-000000?style=for-the-badge&logo=jsonwebtokens&logoColor=white)](https://jwt.io/)
-
-A production-grade, full-stack E-Commerce web application engineered with a modern **MERN architecture**, featuring **Razorpay Payment Gateway integration**, secure **JWT cookie-based authentication**, real-time **stock decrementing**, and a responsive **React 19 single-page interface**.
+> **An Indian retail commerce platform (`₹ INR`) that pairs traditional catalogue shopping with goal-based bundle building, honest trade-off analysis, cart-hash-bound discount negotiation, and Razorpay UPI QR checkout—backed by deterministic server-side guardrails.**
 
 ---
 
-## 📑 Table of Contents
+## Why SmartKart Exists (The Product Problem)
 
-- [Architectural Overview](#-architectural-overview)
-- [Key Features](#-key-features)
-- [Technology Stack](#-technology-stack)
-- [Project File Structure](#-project-file-structure)
-- [Razorpay Payment Workflow](#-razorpay-payment-workflow)
-- [Step-by-Step Setup Guide](#-step-by-step-setup-guide)
-  - [Prerequisites](#prerequisites)
-  - [1. Clone Repository](#1-clone-the-repository)
-  - [2. Backend Setup & Configuration](#2-backend-setup--configuration)
-  - [3. Database Seeding](#3-seed-database-with-sample-products)
-  - [4. Frontend Setup](#4-frontend-setup)
-- [REST API Reference](#-rest-api-reference)
-- [Security & Production Best Practices](#-security--production-best-practices)
-- [Author & License](#-author--license)
+Most e-commerce stores are built only for **SKU-level search**: if you already know you want a *"Keychron K2 V2"*, search works well. Put yourself in the shoes of a customer who only has a **goal and a budget**—such as *"Set up a quiet work-from-home desk under ₹15,000"* or *"Hostel room essentials under ₹5,000"*. Traditional stores force shoppers to open 20 tabs, manually track a running total, cross-check compatibility, and read dozens of reviews to spot hidden flaws.
+
+**SmartKart** solves this by uniting **two complete shopping workflows** in one cohesive platform:
+1. **Traditional Catalogue Shopping**: Fast filtering by category, price range, stock, and genuine buyer ratings, with honest *"Known trade-offs"* surfaced right on every Product Details page.
+2. **Goal-Driven Intelligent Shopping**: Describe what you are setting up and your budget in plain English to get an editable bundle, run a pre-checkout **Smart Purchase Check** on your cart, ask for a bundle discount, and pay via **Razorpay UPI QR Scanner** or Cards/NetBanking.
 
 ---
 
-## 🏛️ Architectural Overview
+## 6 Engineering Highlights (For Recruiters & Reviewers)
 
-ShopKart follows the **Separation of Concerns (SoC)** and **Model-View-Controller (MVC)** design patterns. The backend Express API operates as a decoupled REST service interfacing with MongoDB Atlas and Razorpay, while the React frontend communicates via an authenticated HTTP layer with automated proxy routing.
-
-```mermaid
-graph TD
-    User([Client / Browser]) -->|User Interactions| ReactApp[React 19 + Vite Frontend]
-    ReactApp -->|HTTP / Axios with Cookies| ViteProxy[Vite Dev Server Proxy]
-    ViteProxy -->|Port 3000| ExpressAPI[Express.js REST API]
-    
-    subgraph Backend Architecture
-        ExpressAPI --> AuthMW[JWT Authentication Middleware]
-        AuthMW --> Controllers[Controllers: Auth, Cart, Orders, Wishlist]
-        Controllers --> DB[(MongoDB Atlas Database)]
-        Controllers --> RazorpaySDK[Razorpay Node SDK]
-    end
-    
-    RazorpaySDK -->|Create Order| RazorpayGateway[Razorpay Payment Servers]
-    ReactApp -->|Opens Checkout Modal| RazorpayCheckout[Razorpay Checkout SDK]
-    RazorpayCheckout -->|Returns Signature & Payment ID| ReactApp
-    ReactApp -->|Verify HMAC Signature| ExpressAPI
-    ExpressAPI -->|Atomic Update: Stock & Status| DB
-```
+| Capability | What the User Experiences | Server-Side Engineering Guardrail |
+| :--- | :--- | :--- |
+| **1. Shop by Goal (`Your Suggested Bundle`)** | Describe a goal (e.g., *"Gaming desk setup under ₹30,000"*). Get a ready-to-edit bundle with a live budget progress bar (`Used` vs `Remaining`), checkboxes, quantity steppers, and a one-line *"Why this?"* rationale per item. | **Non-Destructive Scratchpad**: Proposals (`temporaryProposal: true`) never touch the persisted database cart until the user explicitly clicks **"Add X items to cart"**. Every suggested SKU is validated against live catalogue IDs and stock. |
+| **2. Check My Cart (`Smart Purchase Check`)** | One click above the cart inspects every item against buyer reviews and technical specs, labeling each item as **Great pick** (`✓`), **Good fit** (`●`), or **Worth a second look** (`⚠`)—and offers 1-click **Swap for this** alternatives. | **Strict Visibility & Grounded Synthesis**: Only enabled when the persisted cart has $\ge 1$ item (`hasPersistedCartItems`). Never returns `"INSUFFICIENT DATA"`—if a product has 0 reviews, the engine synthesizes an honest assessment from its hardware specs and price tier. Swapping an item preserves its original cart quantity. |
+| **3. Ask for a Discount (Cart-Hash Bound)** | Inside the Cart Order Summary, shoppers can request a bundle discount (e.g., *"Buying a complete study setup, can I get 10% off?"*) and receive an instant applied discount code. | **15% Hard Cap + Cryptographic Cart Binding**: Even if a user asks for 50% off, the server strictly caps discounts at **15%**. Approved offers are bound to a `SHA-256` hash of the exact cart (`productId:quantity`) with a 30-minute TTL. Any cart change immediately invalidates the discount and notifies the user. |
+| **4. Trustworthy Review Separation** | Product pages display **Verified Purchase** reviews first, general **Customer Reviews** second, and collapse **Sample reviews (not from real customers)** at the bottom. | **Zero Rating Pollution**: The server assigns `VERIFIED_PURCHASE` *only* after verifying a `PAID` order containing that product. `DEMO` reviews are strictly excluded from `genuineRating` and `genuineReviewCount` calculations. |
+| **5. Dual-Engine AI Resilience** | Every intelligent feature responds reliably in under 2 seconds whether or not external LLM quotas are available. | **Gemini + Deterministic Fallback**: Uses `@google/genai` with structured JSON schemas and automatically falls back to `services/fallback.service.js` if the API key is omitted, rate-limited, or returns unverified product IDs. |
+| **6. Razorpay UPI QR & Signature Verification** | Clicking **Proceed to Checkout** opens a live **Razorpay Payment Gateway & UPI QR Scanner** with BharatQR, UPI ID (`@okicici`, `@ybl`), and the hosted `checkout.razorpay.com` modal. | **Paise Precision & HMAC-SHA256**: Server recomputes the final total from database prices + validated discount offer, creates a live Razorpay Order (`order_...`) in integer paise (`Math.round(finalTotal * 100)`), and verifies `HMAC-SHA256(order_id + "|" + payment_id, RAZORPAY_KEY_SECRET)` before marking the order `PAID`, decrementing stock, and clearing the cart. |
 
 ---
 
-## ✨ Key Features
-
-### 🔐 1. Authentication & Session Management
-- **Stateless JWT with HTTP-Only Cookies**: Protected from cross-site scripting (XSS) token theft.
-- **Bcrypt Hashing**: Passwords salted and hashed with 10 rounds before persistence.
-- **Route Guards**: Protected frontend navigation and Express middleware authentication guards (`authenticate`).
-
-### 🛍️ 2. Dynamic Catalog & Inventory Control
-- **Real-Time Stock Checks**: Prevents checkout when requested quantities exceed available inventory.
-- **Atomic Stock Decrementing**: Inventory automatically updates upon verified payment completion.
-- **Rich Product Meta**: Multi-category tagging, dynamic pricing, and high-resolution asset displays.
-
-### 🛒 3. Cart & Wishlist Synchronization
-- **Server-Side Persistence**: Cart and wishlist items are synced to the customer's database document, persisting across sessions and devices.
-- **Context API State**: Optimistic UI updates with instant feedback across the navigation bar, badge counts, and checkout totals.
-
-### 💳 4. Razorpay Payment Integration
-- **Two-Phase Payment Handshake**: 
-  1. Backend generates an official Razorpay order with server-calculated totals.
-  2. Frontend opens the Razorpay modal.
-  3. On completion, backend validates the payment cryptographically using `HMAC-SHA256`.
-- **Order State Machine**: Transitions cleanly across `PENDING_PAYMENT` ➔ `PLACED` ➔ `CONFIRMED` ➔ `SHIPPED` ➔ `DELIVERED`.
-
----
-
-## 🛠️ Technology Stack
-
-| Layer | Technologies |
-| :--- | :--- |
-| **Frontend** | React 19, Vite 8, React Router v7, Lucide Icons, Vanilla CSS Design System |
-| **Backend** | Node.js, Express.js 5, Cookie Parser, Dotenv |
-| **Database** | MongoDB Atlas, Mongoose ODM |
-| **Payment Gateway** | Razorpay Node SDK, Razorpay Checkout.js |
-| **Security** | JSON Web Tokens (`jsonwebtoken`), `bcrypt`, `crypto` (HMAC-SHA256) |
-
----
-
-## 📂 Project File Structure
+## System Architecture
 
 ```text
-ShopKart/
-├── config/
-│   └── razorpay.js              # Razorpay SDK initialization & singleton instance
-├── controllers/
-│   ├── customer.controller.js   # Customer register, login, logout, profile
-│   ├── product.controller.js    # Catalog queries, search, and product details
-│   ├── cart.controller.js       # Add/update/remove cart items with stock validation
-│   ├── wishlist.controller.js   # Wishlist toggle and fetching
-│   └── order.controller.js      # Razorpay order generation, HMAC verification, lifecycle
-├── middlewares/
-│   └── auth.middleware.js       # JWT cookie extraction and route authentication guard
-├── models/
-│   ├── customer.model.js        # Customer schema (auth, cart items, wishlist references)
-│   ├── product.model.js         # Product schema (stock, pricing, image, category)
-│   └── order.model.js           # Order schema (items snapshot, address, Razorpay metadata)
-├── routes/
-│   ├── customer.routes.js       # /customers endpoints
-│   ├── product.routes.js        # /products endpoints
-│   ├── cart.routes.js           # /cart endpoints
-│   ├── wishlist.routes.js       # /wishlist endpoints
-│   └── order.routes.js          # /orders endpoints (checkout, verify, order status)
-├── utils/
-│   └── generateToken.js         # JWT signing & HTTP-only cookie configuration
-├── SmartKart-Frontend/          # React 19 Single-Page Application
-│   ├── src/
-│   │   ├── components/          # Reusable UI components (Navbar, ProductCard, CartItem)
-│   │   ├── context/             # Global CartContext (cart count, total, actions)
-│   │   ├── pages/               # Views: Home, Products, Cart, Checkout, Orders, Wishlist
-│   │   ├── services/            # Axios API instances withCredentials configuration
-│   │   ├── App.jsx              # Main routing tree and route guards
-│   │   ├── App.css              # Glassmorphism & responsive CSS utility system
-│   │   └── main.jsx             # React DOM entry point
-│   ├── package.json             # Frontend dependencies & Vite scripts
-│   └── vite.config.js           # Vite dev server with backend API reverse proxy
-├── .env.example                 # Environment variables template for new deployments
-├── .gitignore                   # Excludes node_modules, .env, and build artifacts
-├── index.js                     # Express application bootstrap & MongoDB connection
-├── package.json                 # Backend dependencies & npm scripts (start, dev, seed)
-└── seed.js                      # Automated database populator with mock catalog
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                     React 19 + Vite Frontend (SPA)                           │
+│  ┌────────────────┐  ┌──────────────────┐  ┌──────────────┐  ┌────────────┐  │
+│  │ Catalogue &    │  │ Shop by Goal     │  │ Cart, Check  │  │ Razorpay   │  │
+│  │ Honest PDP     │  │ (Scratchpad UI)  │  │ Cart & Offer │  │ QR Gateway │  │
+│  └───────┬────────┘  └────────┬─────────┘  └──────┬───────┘  └─────┬──────┘  │
+└──────────┼────────────────────┼───────────────────┼────────────────┼─────────┘
+           │ REST / JSON        │                   │                │
+┌──────────▼────────────────────▼───────────────────▼────────────────▼─────────┐
+│                     Node.js + Express 5 Backend API                          │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────────┐  │
+│  │                SmartKart Intelligence Layer (`/api/ai/*`)              │  │
+│  │  • Primary: Google Gemini (`@google/genai`) with JSON Schema Guard     │  │
+│  │  • Fallback: Deterministic Rule Engine (`services/fallback.service.js`)│  │
+│  │  • Validator: Catalogue SKU Verification + 15% Cap + SHA-256 CartHash  │  │
+│  └────────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  ┌───────────────────────────────────┐  ┌─────────────────────────────────┐  │
+│  │ Dual-Mode Persistence Layer       │  │ Payment & Order Engine          │  │
+│  │ • Primary: MongoDB Atlas/Mongoose │  │ • Razorpay Orders SDK (Paise)   │  │
+│  │ • Fallback: Zero-Config In-Memory │  │ • 256-bit HMAC-SHA256 Verifier  │  │
+│  │   Store (38 Products + 17 Reviews)│  │ • Atomic Stock Decrement        │  │
+│  └───────────────────────────────────┘  └─────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 🔄 Razorpay Payment Workflow
+## Tech Stack
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Customer as Customer
-    participant Frontend as React Frontend
-    participant Backend as Express Backend
-    participant Razorpay as Razorpay Gateway
-    participant DB as MongoDB Atlas
-
-    Customer->>Frontend: Clicks "Pay with Razorpay"
-    Frontend->>Backend: POST /orders/create-payment-order (Shipping Info)
-    Backend->>DB: Validate Cart & Calculate Total
-    Backend->>Razorpay: razorpay.orders.create({ amount, currency: 'INR' })
-    Razorpay-->>Backend: Returns razorpay_order_id
-    Backend->>DB: Save initial Order (Status: PENDING_PAYMENT)
-    Backend-->>Frontend: Return shopKartOrderId, razorpayOrderId, key_id
-    Frontend->>Razorpay: Open Razorpay Checkout Modal
-    Customer->>Razorpay: Enters Card / UPI / NetBanking details
-    Razorpay-->>Frontend: Returns razorpay_payment_id & razorpay_signature
-    Frontend->>Backend: POST /orders/verify-payment
-    Backend->>Backend: Compute expected signature: HMAC_SHA256(order_id + '|' + payment_id, secret)
-    alt Signature Matches
-        Backend->>DB: Set status: PLACED, paymentStatus: PAID
-        Backend->>DB: Decrement product stock & Clear customer cart
-        Backend-->>Frontend: Return 200 OK (Payment Verified)
-        Frontend-->>Customer: Redirect to /order-success/:id
-    else Signature Mismatch
-        Backend->>DB: Set paymentStatus: FAILED
-        Backend-->>Frontend: Return 400 Bad Request
-        Frontend-->>Customer: Show error modal; Cart preserved
-    end
-```
+- **Frontend**: React 19, Vite, React Router v7, Axios (JWT Bearer + Cookie interceptors), Lucide Icons, Custom Responsive CSS Grid/Flexbox Design System
+- **Backend**: Node.js, Express 5, JSON Web Tokens (`jsonwebtoken`), `bcryptjs`
+- **Database**: MongoDB Atlas + Mongoose 9, with an automatic **Zero-Config In-Memory Store (`inMemoryStore.js`)** so the app boots and passes all tests even without a live MongoDB connection
+- **AI Engine**: Google Gemini SDK (`@google/genai`) + Deterministic Commerce Fallback Engine (`services/fallback.service.js`)
+- **Payments**: Razorpay Node SDK (`razorpay`) + Razorpay Checkout.js + Interactive BharatQR / UPI Scanner (`Test Mode`)
+- **Testing**: Node.js native test runner (`node --test tests/smartkart2.test.js`) covering 11 end-to-end integration tests across 7 suites
 
 ---
 
-## 🚀 Step-by-Step Setup Guide
+## 60-Second Live Demo Walkthrough
 
-### Prerequisites
-- [Node.js](https://nodejs.org/) (v18.0.0 or higher)
-- [MongoDB Atlas Account](https://cloud.mongodb.com/) or local MongoDB instance
-- [Razorpay Account](https://dashboard.razorpay.com/) (Test mode keys)
+Want to evaluate the entire product quickly? Follow this path:
+
+1. **1-Click Demo Login**:
+   - Click **"Try Demo Account"** in the top navigation bar (or on the Home / Sign-In page) to sign in immediately without typing credentials.
+2. **Shop by Goal (`/smart-shop`)**:
+   - Click **"Shop by Goal"** in the navbar or pick a hero chip like *"Home gym & fitness essentials under ₹10,000"* or *"Gaming desk setup under ₹30,000"*.
+   - Watch **Your Suggested Bundle** appear on the right with a budget progress bar (`Used` vs `Remaining`), one-line *"Why this?"* explanations, and a *"Customers also add this"* cross-sell card.
+   - Adjust quantities with `-` / `+` or uncheck items—notice your actual cart badge in the navbar **does not change** until you click **"Add X items to cart · ₹..."**.
+3. **Honest Product Details (`/products/:id`)**:
+   - Open any product to see its genuine rating, stock urgency badge (*"Only X left"*), **Key Specifications**, **Known trade-offs** (surfaced honestly before you buy), **Verified Purchase** reviews first, and collapsed **Sample reviews (not from real customers)** last.
+4. **Check My Cart & Swap an Item (`/cart`)**:
+   - Add the *HyperPulse X100 Budget Gaming Headset* (or any item) to your cart and click **"Check My Cart"** directly above your cart items.
+   - Inspect the **Smart Purchase Check** modal: items with comfort or durability concerns are flagged as **Worth a second look** (`⚠`) alongside better-rated in-stock alternatives. Click **"Swap for this"** to replace the item in your cart while preserving its quantity.
+5. **Ask for a Discount (`/cart`)**:
+   - In the right-hand Order Summary card, type *"Student buying a study bundle, can I get 15% off?"* into **Ask for a Discount** and click **Apply**.
+   - Try changing an item's quantity afterward to see the automatic security invalidation notice when the cart hash changes.
+6. **Razorpay UPI QR Scanner Checkout (`/checkout`)**:
+   - Click **Proceed to Checkout** to open the **Razorpay Payment Gateway & UPI QR Scanner** connected to a live Razorpay Test Order (`order_...`).
+   - Click **"Scan & Complete Payment"** (or launch the hosted Razorpay Cards/NetBanking window) to verify the `HMAC-SHA256` signature and view your **Order Status Timeline** (`PLACED → CONFIRMED → SHIPPED → DELIVERED`).
 
 ---
 
-### 1. Clone the Repository
+## Key API Endpoints
+
+| Method & Endpoint | Description |
+| :--- | :--- |
+| `POST /customers/register` / `POST /customers/login` | Customer registration & JWT authentication |
+| `GET /products` / `GET /products/:id` | Catalogue listing with category/search/sort & enriched `genuineRating` + `knownTradeOffs` |
+| `GET /cart` / `POST /cart/:productId` / `PATCH /cart/:productId` | Persisted cart management with automatic `cartHash` discount revalidation |
+| `DELETE /cart/discount/offer` | Manually remove an active negotiated discount code from the cart |
+| `POST /api/ai/smart-shop/plan` | Generate a non-destructive **Shop by Goal** bundle (`temporaryProposal: true`) |
+| `POST /api/ai/smart-shop/apply` | Explicitly add user-selected bundle items and quantities to the persisted cart |
+| `POST /api/ai/smart-cart/review` | Run **Check My Cart** & **Smart Purchase Check** on persisted cart items |
+| `POST /api/ai/smart-cart/replace` | **Swap for this**: replace a flagged cart product with an in-stock alternative preserving quantity |
+| `POST /api/ai/smart-cart/negotiate` | **Ask for a Discount**: negotiate a bundle discount (server-capped at $\le 15\%$, bound to `cartHash`) |
+| `POST /orders/create-payment-order` | Revalidate server-side cart total & discount, create live Razorpay order in paise |
+| `POST /orders/verify-payment` | Verify Razorpay `HMAC-SHA256` signature, decrement stock, clear cart, and place order |
+| `GET /reviews/product/:productId` / `POST /reviews/product/:productId` | Fetch separated reviews (`VERIFIED_PURCHASE`, `CUSTOMER_REVIEW`, `DEMO`) & submit buyer reviews |
+
+---
+
+## Local Setup & Environment Variables
+
+### 1. Clone & Install
+
 ```bash
 git clone https://github.com/Ramu-9/SmartKart.git
 cd SmartKart
+npm install
 ```
 
----
+### 2. Configure Environment (`.env`)
 
-### 2. Backend Setup & Configuration
+Copy `.env.example` to `.env`. SmartKart is engineered with **graceful fallbacks**: if `MONGODB_URI`, `GEMINI_API_KEY`, or `RAZORPAY_KEY_ID` are omitted, the server automatically activates its seeded 38-product in-memory store, deterministic commerce engine, and test-mode payment verification.
 
-1. **Install backend dependencies:**
-   ```bash
-   npm install
-   ```
+```env
+PORT=3000
+JWT_EXPIRES_IN=7d
+JWT_SECRET=your_jwt_secret_key
 
-2. **Configure environment variables:**
-   Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
+# Optional: MongoDB Atlas URI (falls back to built-in 38-product in-memory store when omitted)
+MONGODB_URI=
 
-3. **Populate your `.env` values:**
-   ```env
-   PORT=3000
-   MONGODB_URI=mongodb+srv://<username>:<password>@cluster0.mongodb.net/shopkart?retryWrites=true&w=majority
-   JWT_SECRET=your_super_secret_jwt_key
-   JWT_EXPIRES_IN=7d
-   RAZORPAY_KEY_ID=rzp_test_your_key_id
-   RAZORPAY_KEY_SECRET=your_razorpay_secret_key
-   ```
+# Optional: Google Gemini API Key (falls back to deterministic rule engine when omitted)
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash
 
-   > [!IMPORTANT]
-   > Make sure your current IP address is whitelisted in MongoDB Atlas under **Network Access** → **IP Access List**.
+# Optional: Razorpay Test Mode Credentials
+RAZORPAY_KEY_ID=
+RAZORPAY_KEY_SECRET=
+```
 
----
+### 3. Run the Application & Automated Tests
 
-### 3. Seed Database with Sample Products
-Populate MongoDB with default electronics, fashion, and books:
 ```bash
+# Run the 11 end-to-end automated integration tests
+npm test
+
+# Build frontend and start the full-stack server on http://localhost:3000
+npm run dev
+
+# Optional: Seed MongoDB Atlas with idempotent upserts (blocked in production)
 npm run seed
 ```
 
 ---
 
-### 4. Frontend Setup
+## Automated Verification Suite (`npm test`)
 
-1. **Navigate to the frontend directory:**
-   ```bash
-   cd SmartKart-Frontend
-   ```
-
-2. **Install frontend dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Start the frontend development server:**
-   ```bash
-   npm run dev
-   ```
-
----
-
-### 5. Running Both Servers
-
-- **Backend Server**: Run `npm run dev` in the root directory (`http://localhost:3000`).
-- **Frontend App**: Run `npm run dev` inside `SmartKart-Frontend` (`http://localhost:5173`).
-
----
-
-## 📡 REST API Reference
-
-### 👤 Customer Endpoints (`/customers`)
-| Method | Endpoint | Auth | Description |
-| :--- | :--- | :---: | :--- |
-| `POST` | `/customers/register` | No | Register new user (name, email, password) |
-| `POST` | `/customers/login` | No | Authenticate user & issue HTTP-only cookie |
-| `POST` | `/customers/logout` | Yes | Clear JWT session cookie |
-| `GET` | `/customers/profile` | Yes | Fetch authenticated user profile |
-
-### 📦 Product Endpoints (`/products`)
-| Method | Endpoint | Auth | Description |
-| :--- | :--- | :---: | :--- |
-| `GET` | `/products` | No | Fetch all active products |
-| `GET` | `/products/:id` | No | Fetch individual product by ID |
-
-### 🛒 Cart Endpoints (`/cart`)
-| Method | Endpoint | Auth | Description |
-| :--- | :--- | :---: | :--- |
-| `GET` | `/cart` | Yes | Get customer's cart with populated product data |
-| `POST` | `/cart/add` | Yes | Add product to cart with quantity validation |
-| `PUT` | `/cart/update` | Yes | Update item quantity in cart |
-| `DELETE`| `/cart/remove/:productId` | Yes | Remove specific item from cart |
-
-### 💖 Wishlist Endpoints (`/wishlist`)
-| Method | Endpoint | Auth | Description |
-| :--- | :--- | :---: | :--- |
-| `GET` | `/wishlist` | Yes | Get customer's saved wishlist products |
-| `POST` | `/wishlist/toggle` | Yes | Add/remove product from wishlist |
-
-### 💳 Order & Payment Endpoints (`/orders`)
-| Method | Endpoint | Auth | Description |
-| :--- | :--- | :---: | :--- |
-| `POST` | `/orders/create-payment-order` | Yes | Validate cart, create DB order & Razorpay order |
-| `POST` | `/orders/verify-payment` | Yes | Validate HMAC-SHA256 signature, finalize order & decrement stock |
-| `GET` | `/orders` | Yes | Get order history for authenticated user |
-| `GET` | `/orders/:id` | Yes | Fetch complete order breakdown & delivery status |
-| `PATCH`| `/orders/:id/status` | Yes | Update status (`PENDING_PAYMENT`, `PLACED`, `CONFIRMED`, `SHIPPED`, `DELIVERED`) |
-
----
-
-## 🔒 Security & Production Best Practices
-
-- **Zero-Secret Leakage**: Sensitive credentials (`.env`) are strictly ignored by `.gitignore`, with `.env.example` provided for safe onboarding.
-- **Cryptographic Signature Validation**: Razorpay webhook/client payloads are verified using Node's native `crypto.createHmac('sha256', secret)` to eliminate tampering or forged payment IDs.
-- **Strict Input Sanitization**: Form inputs, pincodes, and MongoDB ObjectIDs are strictly validated prior to database queries.
-- **Safe Stock Decrementation**: Products are checked for available inventory immediately before order creation and atomically updated upon payment verification.
-
----
-
-## 📄 License
-This project is open-source and available under the [MIT License](LICENSE).
+Running `npm test` executes `tests/smartkart2.test.js` (11 integration tests across 7 suites):
+1. **Catalogue & Seed Integrity**: Verifies all 38 products across 6 categories and preserves original SKUs.
+2. **Shop by Goal Non-Destructive Workflow**: Confirms temporary proposals stay within budget, extract multi-quantity requests, include at most 1 cross-sell item, validate real catalogue IDs, and **never** mutate the persisted cart until `/api/ai/smart-shop/apply` is called.
+3. **Check My Cart Guardrail**: Confirms AI Cart Review rejects empty persisted carts even after generating a temporary bundle.
+4. **Review Source Separation & Verified Badges**: Confirms `VERIFIED_PURCHASE` vs `CUSTOMER_REVIEW` assignment, blocks duplicate reviews (`409`), enforces owner-only edits (`403`), and excludes `DEMO` reviews from `genuineRating`.
+5. **Smart Purchase Check & Product Swap**: Confirms cautionary items are flagged with in-stock alternatives, zero-review products synthesize spec-based reviews (never returning `INSUFFICIENT DATA`), and swapping preserves item quantity.
+6. **Discount Cap (15%), Cart-Hash Invalidation & Razorpay HMAC**: Confirms $>15\%$ requests are capped at $15\%$, cart mutations clear active discounts, Razorpay orders use exact paise (`finalTotal * 100`), invalid signatures fail (`400`) without clearing the cart, and valid `HMAC-SHA256` signatures complete the order.

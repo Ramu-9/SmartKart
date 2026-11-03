@@ -31,8 +31,8 @@ const Wishlist = () => {
       setWishlist(prev => prev.filter(item => item._id !== productId));
       
       window.dispatchEvent(new Event('wishlistUpdated'));
-    } catch (err) {
-      alert('Unable to remove product from wishlist. Please try again.');
+    } catch {
+      setError('Unable to remove product from wishlist. Please try again.');
     }
   };
 

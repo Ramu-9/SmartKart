@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { Heart, Star, ShoppingBag } from 'lucide-react';
 import { wishlistApi } from '../services/api';
 import { useCart } from '../context/CartContext';
+import { useToast } from '../context/ToastContext';
+import { handleImageError } from '../utils/imageFallback';
 
 const ProductCard = ({ product, isWishlisted: initialWishlisted, onWishlistToggle }) => {
+  const navigate = useNavigate();
+  const { showToast } = useToast();
   const [isSaving, setIsSaving] = useState(false);
   const [isWishlisted, setIsWishlisted] = useState(initialWishlisted);
-  const [errorMsg, setErrorMsg] = useState('');
-  const [cartFeedback, setCartFeedback] = useState('');
   const [isAddingLocal, setIsAddingLocal] = useState(false);
 
   const { addToCart, isInCart, actionLoading } = useCart();
@@ -21,23 +24,26 @@ const ProductCard = ({ product, isWishlisted: initialWishlisted, onWishlistToggl
 
   const handleToggleWishlist = async () => {
     if (isSaving) return;
-    
     setIsSaving(true);
-    setErrorMsg('');
-    
+
     try {
       const response = await wishlistApi.patch(`/${product._id}/toggle`);
       const { saved } = response.data;
-      
+
       setIsWishlisted(saved);
       if (onWishlistToggle) {
         onWishlistToggle(product._id, saved);
       }
-      
+
       window.dispatchEvent(new Event('wishlistUpdated'));
-    } catch (error) {
-      console.error('Failed to toggle wishlist:', error);
-      setErrorMsg('Unable to save product. Please try again.');
+      showToast(
+        saved
+          ? `Saved "${product.name}" to your wishlist`
+          : `Removed "${product.name}" from wishlist`,
+        saved ? 'success' : 'info'
+      );
+    } catch {
+      showToast('Please sign in or click "Try Demo Account" to save items to your wishlist', 'error');
     } finally {
       setIsSaving(false);
     }
@@ -46,125 +52,139 @@ const ProductCard = ({ product, isWishlisted: initialWishlisted, onWishlistToggl
   const handleAddToCart = async () => {
     if (isAdding || product.stock <= 0) return;
     setIsAddingLocal(true);
-    setCartFeedback('');
     try {
       const result = await addToCart(product._id);
       if (!result.success) {
-        setCartFeedback(result.message);
+        if (result.status === 401) {
+          showToast('Please sign in or try the Demo Account to add items to your cart', 'error');
+          navigate('/login');
+        } else {
+          showToast(result.message || 'Unable to add item to cart', 'error');
+        }
       } else {
-        setCartFeedback(inCart ? 'Added another to cart!' : 'Added to cart!');
-        setTimeout(() => setCartFeedback(''), 2500);
+        showToast(
+          inCart
+            ? `Added another "${product.name}" to your cart`
+            : `Added "${product.name}" to your cart`,
+          'success'
+        );
       }
-    } catch (_err) {
-      setCartFeedback('Failed to add to cart');
+    } catch {
+      showToast('Please sign in to add items to your cart', 'error');
     } finally {
       setIsAddingLocal(false);
     }
   };
 
+  const stock = Number(product.stock || 0);
+  const stockLabel =
+    stock <= 0
+      ? 'Out of stock'
+      : stock <= 5
+      ? `Only ${stock} left`
+      : `In stock (${stock})`;
+
+  const stockToneClass =
+    stock <= 0 ? 'out' : stock <= 5 ? 'low' : 'in';
+
+  const hasGenuineRating =
+    product.genuineRating !== null &&
+    product.genuineRating !== undefined &&
+    Number(product.genuineReviewCount || 0) > 0;
+
   return (
-    <div className="product-card">
+    <article className="product-card">
       <div className="product-image-wrapper">
-        <img src={product.image} alt={product.name} className="product-image" />
-        <button 
+        <Link to={`/products/${product._id}`} aria-label={product.name}>
+          <img
+            src={product.image}
+            alt={product.name}
+            referrerPolicy="no-referrer"
+            className="product-image"
+            loading="lazy"
+            onError={handleImageError}
+          />
+        </Link>
+        <button
+          type="button"
           className={`wishlist-icon-btn ${isWishlisted ? 'active' : ''}`}
           onClick={handleToggleWishlist}
           disabled={isSaving}
-          title={isWishlisted ? "Remove from Wishlist" : "Add to Wishlist"}
-          style={{
-            position: 'absolute',
-            top: '10px',
-            right: '10px',
-            background: 'white',
-            border: 'none',
-            borderRadius: '50%',
-            width: '36px',
-            height: '36px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: isSaving ? 'not-allowed' : 'pointer',
-            boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
-            fontSize: '1.2rem',
-            color: isWishlisted ? 'var(--error-color, #ef4444)' : '#ccc',
-            transition: 'all 0.2s ease',
-            zIndex: 10
-          }}
+          title={isWishlisted ? 'Remove from Wishlist' : 'Save to Wishlist'}
+          aria-label={isWishlisted ? 'Remove from Wishlist' : 'Save to Wishlist'}
         >
-          {isSaving ? '⏳' : isWishlisted ? '♥' : '♡'}
+          <Heart
+            size={16}
+            fill={isWishlisted ? '#EF4444' : 'none'}
+            color={isWishlisted ? '#EF4444' : 'currentColor'}
+            strokeWidth={2}
+          />
         </button>
       </div>
+
       <div className="product-info">
-        <h3 className="product-name">{product.name}</h3>
-        <p className="product-category">{product.category}</p>
-        <p className="product-price">₹{product.price.toLocaleString('en-IN')}</p>
-        <p className="product-stock">
-          {product.stock > 0 ? `${product.stock} units left` : 'Out of stock'}
-        </p>
-        
-        {errorMsg && (
-          <p style={{ color: 'var(--error-color, #ef4444)', fontSize: '0.8rem', marginTop: '0.25rem' }}>
-            {errorMsg}
-          </p>
-        )}
-        {cartFeedback && (
-          <p style={{
-            fontSize: '0.8rem',
-            color: cartFeedback.includes('Added') ? '#15803d' : '#b91c1c',
-            marginTop: '0.25rem',
-            fontWeight: '500'
-          }}>
-            {cartFeedback}
-          </p>
-        )}
-        
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1rem' }}>
+        <div className="product-meta-top">
+          <span className="product-category">
+            {product.brand ? `${product.brand} · ` : ''}
+            {product.category}
+          </span>
+        </div>
+
+        <Link to={`/products/${product._id}`} className="product-name-link">
+          <h3 className="product-name">{product.name}</h3>
+        </Link>
+
+        {/* Star rating + genuine review count (DEMO reviews strictly excluded) */}
+        <div className="product-rating-row" aria-label="Customer rating">
+          {hasGenuineRating ? (
+            <>
+              <span className="product-star-badge">
+                <Star size={13} fill="#D97706" color="#D97706" />
+                <span>{product.genuineRating}</span>
+              </span>
+              <span className="product-review-count">
+                ({product.genuineReviewCount}{' '}
+                {product.genuineReviewCount === 1 ? 'review' : 'reviews'})
+              </span>
+            </>
+          ) : (
+            <span className="product-no-rating">
+              <Star size={13} color="#94A3B8" />
+              <span>No customer ratings yet</span>
+            </span>
+          )}
+        </div>
+
+        <div className="product-price-stock-row">
+          <p className="product-price">₹{product.price.toLocaleString('en-IN')}</p>
+          <span className={`product-stock-tag ${stockToneClass}`}>{stockLabel}</span>
+        </div>
+
+        <div className="product-card-actions">
           <button
             type="button"
             className="btn btn-primary add-to-cart-btn"
             onClick={handleAddToCart}
-            disabled={isAdding || product.stock <= 0}
-            style={{
-              width: '100%',
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}
+            disabled={isAdding || stock <= 0}
           >
-            {product.stock <= 0
-              ? 'Out of Stock'
-              : isAdding
-              ? 'Adding...'
-              : inCart
-              ? 'Add Another'
-              : 'Add to Cart'}
+            <ShoppingBag size={15} />
+            <span>
+              {stock <= 0
+                ? 'Out of Stock'
+                : isAdding
+                ? 'Adding...'
+                : inCart
+                ? 'Add Another'
+                : 'Add to Cart'}
+            </span>
           </button>
 
-          <button 
-            type="button"
-            onClick={handleToggleWishlist}
-            disabled={isSaving}
-            className="btn btn-outline" 
-            style={{ 
-              width: '100%', 
-              display: 'flex', 
-              justifyContent: 'center', 
-              alignItems: 'center',
-              gap: '0.5rem',
-              borderColor: isWishlisted ? 'var(--error-color, #ef4444)' : 'var(--border-color, #e2e8f0)',
-              color: isWishlisted ? 'var(--error-color, #ef4444)' : 'inherit'
-            }}
-          >
-            {isSaving ? '⏳ Saving...' : isWishlisted ? '♥ Remove from Wishlist' : '♡ Add to Wishlist'}
-          </button>
-          
-          <Link to={`/products/${product._id}`} className="view-details-btn" style={{ textAlign: 'center' }}>
-            View Details
+          <Link to={`/products/${product._id}`} className="view-details-btn">
+            Details
           </Link>
         </div>
       </div>
-    </div>
+    </article>
   );
 };
 

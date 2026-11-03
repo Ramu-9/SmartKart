@@ -1,5 +1,7 @@
 const Customer = require('../models/customer.model');
 const Product = require('../models/product.model');
+const mongoose = require('mongoose');
+const inMemoryStore = require('../inMemoryStore');
 
 exports.addToWishlist = async (req, res) => {
   try {
@@ -8,6 +10,21 @@ exports.addToWishlist = async (req, res) => {
 
     if (!productId || !productId.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({ success: false, message: 'Invalid product ID' });
+    }
+
+    if (mongoose.connection.readyState !== 1) {
+      try {
+        inMemoryStore.addToWishlist(userId, productId);
+        return res.status(200).json({ success: true, message: 'Product added to wishlist' });
+      } catch (err) {
+        if (err.message.includes('not found')) {
+          return res.status(404).json({ success: false, message: err.message });
+        }
+        if (err.message.includes('already in wishlist')) {
+          return res.status(409).json({ success: false, message: err.message });
+        }
+        return res.status(400).json({ success: false, message: err.message });
+      }
     }
 
     const product = await Product.findById(productId);
@@ -34,7 +51,16 @@ exports.addToWishlist = async (req, res) => {
 exports.getWishlist = async (req, res) => {
   try {
     const userId = req.user._id;
-    
+
+    if (mongoose.connection.readyState !== 1) {
+      const items = inMemoryStore.getWishlist(userId);
+      return res.status(200).json({
+        success: true,
+        count: items.length,
+        wishlist: items
+      });
+    }
+
     const user = await Customer.findById(userId).populate({
       path: 'wishlist',
       select: 'name price category image stock'
@@ -60,6 +86,18 @@ exports.removeFromWishlist = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid product ID' });
     }
 
+    if (mongoose.connection.readyState !== 1) {
+      try {
+        inMemoryStore.removeFromWishlist(userId, productId);
+        return res.status(200).json({ success: true, message: 'Product removed from wishlist' });
+      } catch (err) {
+        if (err.message.includes('not in wishlist')) {
+          return res.status(404).json({ success: false, message: err.message });
+        }
+        return res.status(400).json({ success: false, message: err.message });
+      }
+    }
+
     const user = await Customer.findById(userId);
 
     if (!user.wishlist.includes(productId)) {
@@ -83,6 +121,18 @@ exports.toggleWishlist = async (req, res) => {
 
     if (!productId || !productId.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({ success: false, message: 'Invalid product ID' });
+    }
+
+    if (mongoose.connection.readyState !== 1) {
+      try {
+        const result = inMemoryStore.toggleWishlist(userId, productId);
+        return res.status(200).json({ success: true, saved: result.saved, message: result.message });
+      } catch (err) {
+        if (err.message.includes('not found')) {
+          return res.status(404).json({ success: false, message: err.message });
+        }
+        return res.status(400).json({ success: false, message: err.message });
+      }
     }
 
     const product = await Product.findById(productId);

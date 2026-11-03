@@ -19,7 +19,16 @@ const customerSchema = new mongoose.Schema({
         min: 1
       }
     }
-  ]
+  ],
+  activeDiscountOffer: {
+    offerId: { type: String },
+    discountPercent: { type: Number, min: 0, max: 15, default: 0 },
+    discountAmount: { type: Number, min: 0, default: 0 },
+    cartHash: { type: String },
+    reason: { type: String },
+    expiresAt: { type: Date },
+    createdAt: { type: Date }
+  }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Customer', customerSchema);

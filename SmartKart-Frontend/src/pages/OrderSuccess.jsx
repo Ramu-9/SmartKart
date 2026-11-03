@@ -3,10 +3,12 @@ import { useParams, Link } from 'react-router-dom';
 import { CheckCircle2, ShoppingBag, ArrowRight } from 'lucide-react';
 import { orderApi } from '../services/api';
 
+const ORDER_STEPS = ['PLACED', 'CONFIRMED', 'SHIPPED', 'DELIVERED'];
+
 const OrderSuccess = () => {
   const { id } = useParams();
   const [order, setOrder] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchOrder = async () => {
@@ -25,17 +27,46 @@ const OrderSuccess = () => {
     }
   }, [id]);
 
+  const currentStepIndex = Math.max(0, ORDER_STEPS.indexOf(order?.status || 'PLACED'));
+
   return (
     <div className="order-success-container">
       <div className="order-success-card">
         <div className="success-icon-wrapper">
-          <CheckCircle2 size={64} color="#15803d" />
+          <CheckCircle2 size={60} color="#15803d" />
         </div>
 
-        <h1 className="success-title">Order Placed Successfully!</h1>
+        <h1 className="success-title">Order Confirmed!</h1>
         <p className="success-message">
-          Thank you for your purchase. Your order has been placed and confirmed.
+          Thank you for your purchase. Your order has been placed in test mode (no real money
+          charged) and is now being prepared.
         </p>
+
+        {/* Order Status Timeline */}
+        <div className="status-tracker-card" style={{ marginBottom: '1.5rem', textAlign: 'left' }}>
+          <h4 className="tracker-title">Order Status Timeline</h4>
+          <div className="tracker-stepper">
+            {ORDER_STEPS.map((step, index) => {
+              const isCompleted = currentStepIndex >= index;
+              const isCurrent = currentStepIndex === index;
+
+              return (
+                <div
+                  key={step}
+                  className={`step-item ${isCompleted ? 'step-completed' : ''} ${
+                    isCurrent ? 'step-active' : ''
+                  }`}
+                >
+                  <div className="step-circle">
+                    {isCompleted ? <CheckCircle2 size={15} /> : index + 1}
+                  </div>
+                  <span className="step-label">{step}</span>
+                  {index < ORDER_STEPS.length - 1 && <div className="step-line"></div>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
         <div className="order-receipt-box">
           <div className="receipt-row">
@@ -69,7 +100,8 @@ const OrderSuccess = () => {
               <div className="receipt-row">
                 <span className="receipt-label">Delivery To:</span>
                 <span className="receipt-value">
-                  {order.shippingAddress?.fullName}, {order.shippingAddress?.city} ({order.shippingAddress?.pincode})
+                  {order.shippingAddress?.fullName}, {order.shippingAddress?.city} (
+                  {order.shippingAddress?.pincode})
                 </span>
               </div>
 
@@ -102,11 +134,19 @@ const OrderSuccess = () => {
         </div>
 
         <div className="success-actions">
-          <Link to="/orders" className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Link
+            to="/orders"
+            className="btn btn-primary"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
+          >
             <span>View My Orders</span>
             <ArrowRight size={16} />
           </Link>
-          <Link to="/products" className="btn btn-outline" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Link
+            to="/products"
+            className="btn btn-outline"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
+          >
             <ShoppingBag size={16} />
             <span>Continue Shopping</span>
           </Link>

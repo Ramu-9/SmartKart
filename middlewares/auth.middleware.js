@@ -1,5 +1,26 @@
 const jwt = require('jsonwebtoken');
 const Customer = require('../models/customer.model');
+const inMemoryStore = require('../inMemoryStore');
+const mongoose = require('mongoose');
+
+async function resolveUserFromRequest(req) {
+  let token = req.cookies && req.cookies.token;
+  if (!token && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+  if (!token) return null;
+
+  const secret = process.env.JWT_SECRET || 'smartkart_jwt_secret_dev_key_2026';
+  const decoded = jwt.verify(token, secret);
+
+  let customer = null;
+  if (mongoose.connection.readyState === 1) {
+    customer = await Customer.findById(decoded.id).select('-password');
+  } else {
+    customer = inMemoryStore.getCustomerById(decoded.id);
+  }
+  return customer || null;
+}
 
 exports.authenticate = async (req, res, next) => {
   try {
@@ -11,9 +32,7 @@ exports.authenticate = async (req, res, next) => {
       return res.status(401).json({ message: 'Authentication required' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    const customer = await Customer.findById(decoded.id).select('-password');
+    const customer = await resolveUserFromRequest(req);
     if (!customer) {
       return res.status(401).json({ message: 'Invalid token' });
     }
@@ -23,4 +42,16 @@ exports.authenticate = async (req, res, next) => {
   } catch (error) {
     return res.status(401).json({ message: 'Invalid token' });
   }
+};
+
+exports.optionalAuthenticate = async (req, res, next) => {
+  try {
+    const customer = await resolveUserFromRequest(req);
+    if (customer) {
+      req.user = customer;
+    }
+  } catch (_err) {
+    // Proceed as guest
+  }
+  next();
 };

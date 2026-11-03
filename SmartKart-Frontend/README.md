@@ -1,16 +1,18 @@
-# React + Vite
+# SmartKart Frontend (`React 19 + Vite`)
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+This directory contains the React 19 Single Page Application for **SmartKart**.
 
-Currently, two official plugins are available:
+## Key Directories
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- `src/constants/uiStrings.js`: Centralized customer-facing UI labels & tooltips (`Shop by Goal`, `Your Suggested Bundle`, `Check My Cart`, `Smart Purchase Check`, `Ask for a Discount`, `Swap for this`).
+- `src/context/CartContext.jsx`: Persisted cart state, `cartHash`-bound discount synchronization, and discount invalidation alerts.
+- `src/context/ToastContext.jsx`: Accessible global toast notification system (`aria-live="polite"`).
+- `src/components/`:
+  - `Navbar.jsx`: Always-visible search bar, Catalogue, Shop by Goal, Wishlist, Cart badge, 1-click **Try Demo Account**, and mobile drawer.
+  - `OnboardingTour.jsx`: 3-step first-visit interactive tooltip tour.
+  - `CartAiReviewModal.jsx`: **Check My Cart** & **Smart Purchase Check** modal with `Great pick` / `Good fit` / `Worth a second look` badges and 1-click **Swap for this** product replacement.
+  - `ProductReviewsSection.jsx`: Separated `VERIFIED_PURCHASE`, `CUSTOMER_REVIEW`, and collapsible `Sample reviews (not from real customers)`.
+- `src/pages/`:
+  - `Home.jsx`, `Products.jsx`, `ProductDetails.jsx`, `SmartShop.jsx`, `Cart.jsx`, `Checkout.jsx` (with live **Razorpay UPI QR Scanner**), `Orders.jsx`, `OrderDetails.jsx`, `OrderSuccess.jsx`, `Wishlist.jsx`, `Login.jsx`, `Register.jsx`.
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+See the root [`README.md`](../README.md) for full architecture, API documentation, and setup instructions.

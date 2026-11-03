@@ -42,6 +42,28 @@ const orderSchema = new mongoose.Schema(
       pincode: { type: String, required: true, trim: true }
     },
 
+    subtotalAmount: {
+      type: Number
+    },
+
+    discountPercent: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 15
+    },
+
+    discountAmount: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+
+    appliedOfferId: {
+      type: String,
+      default: null
+    },
+
     totalAmount: {
       type: Number,
       required: true
