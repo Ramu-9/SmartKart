@@ -1,4 +1,3 @@
-const mongoose = require('mongoose');
 const crypto = require('crypto');
 const Product = require('../models/product.model');
 const Customer = require('../models/customer.model');
@@ -6,11 +5,12 @@ const inMemoryStore = require('../inMemoryStore');
 const geminiService = require('./gemini.service');
 const fallbackService = require('./fallback.service');
 const reviewService = require('./review.service');
+const { isMongoStorage } = require('../config/storageMode');
 
 const isValidObjectId = (id) => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id);
 
 async function fetchAllCatalogueProducts() {
-  if (mongoose.connection.readyState === 1) {
+  if (isMongoStorage()) {
     return await Product.find({}).lean();
   }
   return inMemoryStore.getAllProducts();
@@ -18,7 +18,7 @@ async function fetchAllCatalogueProducts() {
 
 async function fetchProductById(productId) {
   if (!isValidObjectId(productId)) return null;
-  if (mongoose.connection.readyState === 1) {
+  if (isMongoStorage()) {
     return await Product.findById(productId).lean();
   }
   return inMemoryStore.getProductById(productId);
@@ -26,7 +26,7 @@ async function fetchProductById(productId) {
 
 async function fetchPersistedCartForUser(userId) {
   if (!userId) return [];
-  if (mongoose.connection.readyState === 1) {
+  if (isMongoStorage()) {
     const user = await Customer.findById(userId).populate({
       path: 'cart.product',
       select: 'sku name brand price category image stock description tags useCase attributes discountEligible'
@@ -262,7 +262,7 @@ async function applyApprovedProposal({ user, items }) {
     normalizedAdditions.push({ productId: productId.toString(), quantity });
   }
 
-  if (mongoose.connection.readyState === 1) {
+  if (isMongoStorage()) {
     const customer = await Customer.findById(user._id);
     if (!customer) {
       const err = new Error('User not found');
@@ -445,7 +445,7 @@ async function negotiateCartDiscount({ user, message }) {
       }
     : null;
 
-  if (mongoose.connection.readyState === 1) {
+  if (isMongoStorage()) {
     await Customer.findByIdAndUpdate(user._id, {
       $set: { activeDiscountOffer: offer }
     });
@@ -487,7 +487,7 @@ async function getValidatedCartDiscount(userId, persistedCart) {
   );
 
   let offer = null;
-  if (mongoose.connection.readyState === 1) {
+  if (isMongoStorage()) {
     const cust = await Customer.findById(userId).lean();
     offer = cust?.activeDiscountOffer || null;
   } else {
@@ -827,7 +827,7 @@ async function replaceProductInPersistedCart({ user, oldProductId, newProductId 
     throw err;
   }
 
-  if (mongoose.connection.readyState === 1) {
+  if (isMongoStorage()) {
     const customer = await Customer.findById(user._id);
     if (!customer) {
       const err = new Error('User not found');

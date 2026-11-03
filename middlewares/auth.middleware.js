@@ -1,7 +1,8 @@
 const jwt = require('jsonwebtoken');
 const Customer = require('../models/customer.model');
 const inMemoryStore = require('../inMemoryStore');
-const mongoose = require('mongoose');
+const { getJwtSecret } = require('../utils/jwtConfig');
+const { isMongoStorage } = require('../config/storageMode');
 
 async function resolveUserFromRequest(req) {
   let token = req.cookies && req.cookies.token;
@@ -10,11 +11,11 @@ async function resolveUserFromRequest(req) {
   }
   if (!token) return null;
 
-  const secret = process.env.JWT_SECRET || 'smartkart_jwt_secret_dev_key_2026';
+  const secret = getJwtSecret();
   const decoded = jwt.verify(token, secret);
 
   let customer = null;
-  if (mongoose.connection.readyState === 1) {
+  if (isMongoStorage()) {
     customer = await Customer.findById(decoded.id).select('-password');
   } else {
     customer = inMemoryStore.getCustomerById(decoded.id);

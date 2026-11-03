@@ -23,7 +23,7 @@ Most e-commerce stores are built only for **SKU-level search**: if you already k
 | **3. Ask for a Discount (Cart-Hash Bound)** | Inside the Cart Order Summary, shoppers can request a bundle discount (e.g., *"Buying a complete study setup, can I get 10% off?"*) and receive an instant applied discount code. | **15% Hard Cap + Cryptographic Cart Binding**: Even if a user asks for 50% off, the server strictly caps discounts at **15%**. Approved offers are bound to a `SHA-256` hash of the exact cart (`productId:quantity`) with a 30-minute TTL. Any cart change immediately invalidates the discount and notifies the user. |
 | **4. Trustworthy Review Separation** | Product pages display **Verified Purchase** reviews first, general **Customer Reviews** second, and collapse **Sample reviews (not from real customers)** at the bottom. | **Zero Rating Pollution**: The server assigns `VERIFIED_PURCHASE` *only* after verifying a `PAID` order containing that product. `DEMO` reviews are strictly excluded from `genuineRating` and `genuineReviewCount` calculations. |
 | **5. Dual-Engine AI Resilience** | Every intelligent feature responds reliably in under 2 seconds whether or not external LLM quotas are available. | **Gemini + Deterministic Fallback**: Uses `@google/genai` with structured JSON schemas and automatically falls back to `services/fallback.service.js` if the API key is omitted, rate-limited, or returns unverified product IDs. |
-| **6. Razorpay UPI QR & Signature Verification** | Clicking **Proceed to Checkout** opens a live **Razorpay Payment Gateway & UPI QR Scanner** with BharatQR, UPI ID (`@okicici`, `@ybl`), and the hosted `checkout.razorpay.com` modal. | **Paise Precision & HMAC-SHA256**: Server recomputes the final total from database prices + validated discount offer, creates a live Razorpay Order (`order_...`) in integer paise (`Math.round(finalTotal * 100)`), and verifies `HMAC-SHA256(order_id + "|" + payment_id, RAZORPAY_KEY_SECRET)` before marking the order `PAID`, decrementing stock, and clearing the cart. |
+| **6. Razorpay Checkout & Replay-Safe Verification** | Clicking **Proceed to Checkout** validates the customer's shipping address, creates a server-side payment order, and launches Razorpay Checkout (or an explicitly labeled non-production simulation in dev/test). | **Constant-Time HMAC-SHA256 & Replay Protection**: Server recomputes the final total from database prices + validated discount offer, verifies `HMAC-SHA256(order_id + "|" + payment_id, RAZORPAY_KEY_SECRET)` via `crypto.timingSafeEqual`, rejects duplicate order or payment ID replays (`409 Conflict`) so stock is never double-decremented, and blocks simulated signatures in production. |
 
 ---
 
@@ -34,7 +34,7 @@ Most e-commerce stores are built only for **SKU-level search**: if you already k
 │                     React 19 + Vite Frontend (SPA)                           │
 │  ┌────────────────┐  ┌──────────────────┐  ┌──────────────┐  ┌────────────┐  │
 │  │ Catalogue &    │  │ Shop by Goal     │  │ Cart, Check  │  │ Razorpay   │  │
-│  │ Honest PDP     │  │ (Scratchpad UI)  │  │ Cart & Offer │  │ QR Gateway │  │
+│  │ Honest PDP     │  │ (Scratchpad UI)  │  │ Cart & Offer │  │ Checkout   │  │
 │  └───────┬────────┘  └────────┬─────────┘  └──────┬───────┘  └─────┬──────┘  │
 └──────────┼────────────────────┼───────────────────┼────────────────┼─────────┘
            │ REST / JSON        │                   │                │
@@ -49,10 +49,10 @@ Most e-commerce stores are built only for **SKU-level search**: if you already k
 │  └────────────────────────────────────────────────────────────────────────┘  │
 │                                                                              │
 │  ┌───────────────────────────────────┐  ┌─────────────────────────────────┐  │
-│  │ Dual-Mode Persistence Layer       │  │ Payment & Order Engine          │  │
-│  │ • Primary: MongoDB Atlas/Mongoose │  │ • Razorpay Orders SDK (Paise)   │  │
-│  │ • Fallback: Zero-Config In-Memory │  │ • 256-bit HMAC-SHA256 Verifier  │  │
-│  │   Store (38 Products + 17 Reviews)│  │ • Atomic Stock Decrement        │  │
+│  │ Explicit Storage Layer            │  │ Payment & Order Engine          │  │
+│  │ • STORAGE_MODE: auto|mongodb|mem  │  │ • Razorpay Orders SDK (Paise)   │  │
+│  │ • Non-destructive $setOnInsert    │  │ • Constant-Time HMAC-SHA256     │  │
+│  │ • Zero-Config In-Memory Fallback  │  │ • Replay & Duplicate Protection │  │
 │  └───────────────────────────────────┘  └─────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -63,10 +63,10 @@ Most e-commerce stores are built only for **SKU-level search**: if you already k
 
 - **Frontend**: React 19, Vite, React Router v7, Axios (JWT Bearer + Cookie interceptors), Lucide Icons, Custom Responsive CSS Grid/Flexbox Design System
 - **Backend**: Node.js, Express 5, JSON Web Tokens (`jsonwebtoken`), `bcryptjs`
-- **Database**: MongoDB Atlas + Mongoose 9, with an automatic **Zero-Config In-Memory Store (`inMemoryStore.js`)** so the app boots and passes all tests even without a live MongoDB connection
+- **Database**: MongoDB Atlas + Mongoose 9 with explicit startup storage-mode resolution (`STORAGE_MODE=auto|mongodb|memory`) and non-destructive `$setOnInsert` seeding
 - **AI Engine**: Google Gemini SDK (`@google/genai`) + Deterministic Commerce Fallback Engine (`services/fallback.service.js`)
-- **Payments**: Razorpay Node SDK (`razorpay`) + Razorpay Checkout.js + Interactive BharatQR / UPI Scanner (`Test Mode`)
-- **Testing**: Node.js native test runner (`node --test tests/smartkart2.test.js`) covering 11 end-to-end integration tests across 7 suites
+- **Payments**: Razorpay Node SDK (`razorpay`) + Razorpay Checkout.js (`checkout.razorpay.com`) with server-side `HMAC-SHA256` signature verification and non-production simulation fallback
+- **Testing**: Node.js native test runner (`node --test tests/smartkart2.test.js`) covering 15 end-to-end integration and security tests across 7 suites
 
 ---
 
@@ -75,7 +75,7 @@ Most e-commerce stores are built only for **SKU-level search**: if you already k
 Want to evaluate the entire product quickly? Follow this path:
 
 1. **1-Click Demo Login**:
-   - Click **"Try Demo Account"** in the top navigation bar (or on the Home / Sign-In page) to sign in immediately without typing credentials.
+   - Click **"Try Demo Account"** in the top navigation bar (or on the Home / Sign-In page) to sign in immediately in development/demo mode.
 2. **Shop by Goal (`/smart-shop`)**:
    - Click **"Shop by Goal"** in the navbar or pick a hero chip like *"Home gym & fitness essentials under ₹10,000"* or *"Gaming desk setup under ₹30,000"*.
    - Watch **Your Suggested Bundle** appear on the right with a budget progress bar (`Used` vs `Remaining`), one-line *"Why this?"* explanations, and a *"Customers also add this"* cross-sell card.
@@ -88,9 +88,10 @@ Want to evaluate the entire product quickly? Follow this path:
 5. **Ask for a Discount (`/cart`)**:
    - In the right-hand Order Summary card, type *"Student buying a study bundle, can I get 15% off?"* into **Ask for a Discount** and click **Apply**.
    - Try changing an item's quantity afterward to see the automatic security invalidation notice when the cart hash changes.
-6. **Razorpay UPI QR Scanner Checkout (`/checkout`)**:
-   - Click **Proceed to Checkout** to open the **Razorpay Payment Gateway & UPI QR Scanner** connected to a live Razorpay Test Order (`order_...`).
-   - Click **"Scan & Complete Payment"** (or launch the hosted Razorpay Cards/NetBanking window) to verify the `HMAC-SHA256` signature and view your **Order Status Timeline** (`PLACED → CONFIRMED → SHIPPED → DELIVERED`).
+6. **Checkout & Payment Verification (`/checkout`)**:
+   - Enter your delivery address and initiate payment:
+     - When live/test **Razorpay credentials** (`RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET`) are configured, SmartKart creates a real Razorpay Order (`order_...`) and opens **Razorpay Checkout** (`window.Razorpay`), verifying the returned `razorpay_payment_id` and `razorpay_signature` via server-side `HMAC-SHA256`.
+     - When running locally without Razorpay credentials (`NODE_ENV !== 'production'`), SmartKart uses an explicitly labeled **Non-Production Test Simulation** (`order_sim_...`) so you can test the post-checkout **Order Status Timeline** (`PLACED → CONFIRMED → SHIPPED → DELIVERED`). Simulated payments are strictly disabled in production (`NODE_ENV=production`).
 
 ---
 
@@ -107,13 +108,13 @@ Want to evaluate the entire product quickly? Follow this path:
 | `POST /api/ai/smart-cart/review` | Run **Check My Cart** & **Smart Purchase Check** on persisted cart items |
 | `POST /api/ai/smart-cart/replace` | **Swap for this**: replace a flagged cart product with an in-stock alternative preserving quantity |
 | `POST /api/ai/smart-cart/negotiate` | **Ask for a Discount**: negotiate a bundle discount (server-capped at $\le 15\%$, bound to `cartHash`) |
-| `POST /orders/create-payment-order` | Revalidate server-side cart total & discount, create live Razorpay order in paise |
-| `POST /orders/verify-payment` | Verify Razorpay `HMAC-SHA256` signature, decrement stock, clear cart, and place order |
+| `POST /orders/create-payment-order` | Revalidate server-side cart total & discount, create Razorpay order in paise (never exposes server HMAC secrets or pre-signed tokens) |
+| `POST /orders/verify-payment` | Verify Razorpay `HMAC-SHA256` signature with replay protection (`409` on duplicate order/payment ID), decrement stock once, clear cart, and place order |
 | `GET /reviews/product/:productId` / `POST /reviews/product/:productId` | Fetch separated reviews (`VERIFIED_PURCHASE`, `CUSTOMER_REVIEW`, `DEMO`) & submit buyer reviews |
 
 ---
 
-## Local Setup & Environment Variables
+## Local Setup, Storage Modes & Production Deployment
 
 ### 1. Clone & Install
 
@@ -125,46 +126,62 @@ npm install
 
 ### 2. Configure Environment (`.env`)
 
-Copy `.env.example` to `.env`. SmartKart is engineered with **graceful fallbacks**: if `MONGODB_URI`, `GEMINI_API_KEY`, or `RAZORPAY_KEY_ID` are omitted, the server automatically activates its seeded 38-product in-memory store, deterministic commerce engine, and test-mode payment verification.
+Copy `.env.example` to `.env`:
 
 ```env
 PORT=3000
 JWT_EXPIRES_IN=7d
-JWT_SECRET=your_jwt_secret_key
+# Required in production (minimum 16 characters, e.g. openssl rand -hex 32)
+JWT_SECRET=
 
-# Optional: MongoDB Atlas URI (falls back to built-in 38-product in-memory store when omitted)
+# Storage mode: auto | mongodb | memory
+# - mongodb: requires MONGODB_URI and fails fast on startup if unreachable
+# - memory: uses the built-in 38-product in-memory store
+# - auto (default): connects to MONGODB_URI when provided, otherwise uses in-memory store
+STORAGE_MODE=auto
 MONGODB_URI=
 
 # Optional: Google Gemini API Key (falls back to deterministic rule engine when omitted)
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.5-flash
 
-# Optional: Razorpay Test Mode Credentials
+# Razorpay Credentials (required in production)
 RAZORPAY_KEY_ID=
 RAZORPAY_KEY_SECRET=
+
+# Explicitly allow simulated test payments only in non-production environments (true | false)
+ALLOW_SIMULATED_PAYMENTS=false
 ```
 
-### 3. Run the Application & Automated Tests
+### 3. Production Security Requirements (`NODE_ENV=production`)
+- **`JWT_SECRET`**: Must be explicitly set to a strong secret ($\ge 16$ characters). There is no hardcoded public fallback secret; the server refuses to start in production if `JWT_SECRET` is missing or set to a placeholder.
+- **Payments**: Simulated payment orders and `sim_sig_*` signatures are rejected in production unless `ALLOW_SIMULATED_PAYMENTS=true` is explicitly configured for a staging sandbox.
+- **Database Seeding**: Startup catalogue seeding uses `$setOnInsert` so existing products, stock counts, customers, orders, and reviews in MongoDB are never overwritten or deleted.
+
+### 4. Run the Application & Automated Tests
 
 ```bash
-# Run the 11 end-to-end automated integration tests
+# Run all automated integration & security hardening tests
 npm test
 
-# Build frontend and start the full-stack server on http://localhost:3000
+# Build frontend and start the full-stack server on PORT (default 3000)
 npm run dev
 
-# Optional: Seed MongoDB Atlas with idempotent upserts (blocked in production)
-npm run seed
+# Production build & start
+npm run build
+npm start
 ```
 
 ---
 
 ## Automated Verification Suite (`npm test`)
 
-Running `npm test` executes `tests/smartkart2.test.js` (11 integration tests across 7 suites):
+Running `npm test` executes `tests/smartkart2.test.js` (15 integration and security tests across 7 suites):
 1. **Catalogue & Seed Integrity**: Verifies all 38 products across 6 categories and preserves original SKUs.
 2. **Shop by Goal Non-Destructive Workflow**: Confirms temporary proposals stay within budget, extract multi-quantity requests, include at most 1 cross-sell item, validate real catalogue IDs, and **never** mutate the persisted cart until `/api/ai/smart-shop/apply` is called.
 3. **Check My Cart Guardrail**: Confirms AI Cart Review rejects empty persisted carts even after generating a temporary bundle.
 4. **Review Source Separation & Verified Badges**: Confirms `VERIFIED_PURCHASE` vs `CUSTOMER_REVIEW` assignment, blocks duplicate reviews (`409`), enforces owner-only edits (`403`), and excludes `DEMO` reviews from `genuineRating`.
 5. **Smart Purchase Check & Product Swap**: Confirms cautionary items are flagged with in-stock alternatives, zero-review products synthesize spec-based reviews (never returning `INSUFFICIENT DATA`), and swapping preserves item quantity.
 6. **Discount Cap (15%), Cart-Hash Invalidation & Razorpay HMAC**: Confirms $>15\%$ requests are capped at $15\%$, cart mutations clear active discounts, Razorpay orders use exact paise (`finalTotal * 100`), invalid signatures fail (`400`) without clearing the cart, and valid `HMAC-SHA256` signatures complete the order.
+7. **Engineering Hardening (Replay Protection, Production Simulation Lock, JWT Secret Enforcement & Non-Destructive Seeding)**: Confirms `/orders/create-payment-order` never leaks `qrSignature`, duplicate payment verification or reused `razorpay_payment_id` is rejected with `409 Conflict` without double-decrementing stock, simulated signatures are rejected in production, `getJwtSecret()` throws in production when `JWT_SECRET` is missing/placeholder, and non-destructive seeding uses `$setOnInsert`.
+

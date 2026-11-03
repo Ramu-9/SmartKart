@@ -1,16 +1,39 @@
-if (process.env.NODE_ENV !== 'test') {
-  require('dotenv').config({ override: true });
-} else {
-  require('dotenv').config();
-}
 const path = require('path');
 const fs = require('fs');
+const dotenv = require('dotenv');
+
+// Load .env without blindly clobbering legitimate deployment env vars,
+// while replacing known template placeholder strings if pre-injected by container runtimes.
+const parsedEnv = dotenv.config().parsed || {};
+const KNOWN_PLACEHOLDERS = new Set([
+  'rzp_test_your_razorpay_key_id',
+  'your_razorpay_key_secret',
+  'rzp_test_placeholder',
+  'razorpay_secret_placeholder',
+  'smartkart_jwt_secret_dev_key_2026',
+  'your_jwt_secret_key'
+]);
+
+if (process.env.NODE_ENV !== 'test') {
+  for (const [k, v] of Object.entries(parsedEnv)) {
+    const current = process.env[k];
+    if (!current || KNOWN_PLACEHOLDERS.has(current.trim())) {
+      process.env[k] = v;
+    }
+  }
+}
+
 const express = require('express');
 const cookieParser = require('cookie-parser');
 const mongoose = require('mongoose');
-const Product = require('./models/product.model');
-const ProductReview = require('./models/productReview.model');
-const { CATALOGUE_PRODUCTS, DEMO_REVIEWS } = require('./data/catalogueData');
+const { validateJwtConfigOnStartup } = require('./utils/jwtConfig');
+const { initializeStorage } = require('./config/storageMode');
+
+// Validate JWT configuration early
+validateJwtConfigOnStartup();
+
+// Mongoose fail-fast config
+mongoose.set('bufferCommands', false);
 
 const app = express();
 
@@ -38,58 +61,6 @@ function aiRateLimiter(req, res, next) {
     });
   }
   next();
-}
-
-// Mongoose fail-fast config
-mongoose.set('bufferCommands', false);
-
-function isValidMongoUri(uri) {
-  if (!uri || typeof uri !== 'string') return false;
-  const trimmed = uri.trim();
-  if (!trimmed.startsWith('mongodb://') && !trimmed.startsWith('mongodb+srv://')) {
-    return false;
-  }
-  if (/<[^>]+>/.test(trimmed)) {
-    return false;
-  }
-  const lower = trimmed.toLowerCase();
-  const placeholderPatterns = [
-    'cluster.mongodb.net',
-    'your_mongodb',
-    'your-mongodb',
-    'example.com',
-    'placeholder'
-  ];
-  return !placeholderPatterns.some(pattern => lower.includes(pattern));
-}
-
-async function ensureIdempotentCatalogueSeed() {
-  if (process.env.NODE_ENV === 'production') return;
-  try {
-    for (const prod of CATALOGUE_PRODUCTS) {
-      await Product.updateOne({ _id: prod._id }, { $set: prod }, { upsert: true });
-    }
-    for (const rev of DEMO_REVIEWS) {
-      await ProductReview.updateOne({ _id: rev._id }, { $set: rev }, { upsert: true });
-    }
-  } catch (err) {
-    console.log('Catalogue upsert skipped:', err.message);
-  }
-}
-
-if (isValidMongoUri(process.env.MONGODB_URI) && process.env.NODE_ENV !== 'test') {
-  mongoose.connect(process.env.MONGODB_URI.trim(), {
-    serverSelectionTimeoutMS: 5000
-  })
-    .then(async () => {
-      console.log('MongoDB connected');
-      await ensureIdempotentCatalogueSeed();
-    })
-    .catch(() => {
-      console.log('MongoDB unreachable — built-in in-memory store active');
-    });
-} else if (process.env.NODE_ENV !== 'test') {
-  console.log('Using built-in in-memory store (38 products & 17 demo reviews loaded)');
 }
 
 const frontendDist = path.join(__dirname, 'SmartKart-Frontend', 'dist');
@@ -122,11 +93,12 @@ app.use('/api/ai', aiRateLimiter, require('./routes/ai.routes'));
 
 // Database offline graceful fallback error middleware
 app.use((err, req, res, next) => {
-  if (err.name === 'MongooseError' || err.name === 'MongoNetworkError' || (err.message && err.message.includes('buffering timed out'))) {
-    console.warn('[AI Studio] Database offline — returning mock response');
-    if (req.method === 'GET') {
-      return res.json(req.path.endsWith('s') || req.path.endsWith('s/') ? [] : {});
-    }
+  if (
+    err.name === 'MongooseError' ||
+    err.name === 'MongoNetworkError' ||
+    (err.message && err.message.includes('buffering timed out'))
+  ) {
+    console.warn('[SmartKart] Database operation failed:', err.message);
     return res.status(503).json({ error: 'Service temporarily unavailable (database offline)' });
   }
   next(err);
@@ -145,10 +117,28 @@ app.use((req, res) => {
   }
 });
 
-const PORT = 3000;
-if (require.main === module) {
-  app.listen(PORT, '0.0.0.0', () => {
+const PORT = Number(parsedEnv.PORT || process.env.PORT) || 3000;
+
+async function startServer() {
+  const indexPath = path.join(frontendDist, 'index.html');
+  if (!fs.existsSync(indexPath) && process.env.NODE_ENV !== 'test') {
+    try {
+      const { execSync } = require('child_process');
+      execSync('npm run build:frontend', { stdio: 'inherit', cwd: __dirname });
+    } catch (buildErr) {
+      console.warn('Frontend build check warning:', buildErr.message);
+    }
+  }
+  await initializeStorage();
+  return app.listen(PORT, '0.0.0.0', () => {
     console.log(`SmartKart server running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+if (require.main === module) {
+  startServer().catch((err) => {
+    console.error(err.message || err);
+    process.exit(1);
   });
 }
 

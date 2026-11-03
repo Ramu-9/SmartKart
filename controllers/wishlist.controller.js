@@ -1,7 +1,7 @@
 const Customer = require('../models/customer.model');
 const Product = require('../models/product.model');
-const mongoose = require('mongoose');
 const inMemoryStore = require('../inMemoryStore');
+const { isMongoStorage } = require('../config/storageMode');
 
 exports.addToWishlist = async (req, res) => {
   try {
@@ -12,7 +12,7 @@ exports.addToWishlist = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid product ID' });
     }
 
-    if (mongoose.connection.readyState !== 1) {
+    if (!isMongoStorage()) {
       try {
         inMemoryStore.addToWishlist(userId, productId);
         return res.status(200).json({ success: true, message: 'Product added to wishlist' });
@@ -52,7 +52,7 @@ exports.getWishlist = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    if (mongoose.connection.readyState !== 1) {
+    if (!isMongoStorage()) {
       const items = inMemoryStore.getWishlist(userId);
       return res.status(200).json({
         success: true,
@@ -86,7 +86,7 @@ exports.removeFromWishlist = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid product ID' });
     }
 
-    if (mongoose.connection.readyState !== 1) {
+    if (!isMongoStorage()) {
       try {
         inMemoryStore.removeFromWishlist(userId, productId);
         return res.status(200).json({ success: true, message: 'Product removed from wishlist' });
@@ -123,7 +123,7 @@ exports.toggleWishlist = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid product ID' });
     }
 
-    if (mongoose.connection.readyState !== 1) {
+    if (!isMongoStorage()) {
       try {
         const result = inMemoryStore.toggleWishlist(userId, productId);
         return res.status(200).json({ success: true, saved: result.saved, message: result.message });

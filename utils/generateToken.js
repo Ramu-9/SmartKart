@@ -1,7 +1,8 @@
 const jwt = require('jsonwebtoken');
+const { getJwtSecret } = require('./jwtConfig');
 
 const generateToken = (userId) => {
-  const secret = process.env.JWT_SECRET || 'smartkart_jwt_secret_dev_key_2026';
+  const secret = getJwtSecret();
   return jwt.sign({ id: userId }, secret, {
     expiresIn: process.env.JWT_EXPIRES_IN || '7d'
   });

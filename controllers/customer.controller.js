@@ -1,8 +1,8 @@
 const Customer = require('../models/customer.model');
 const bcrypt = require('bcryptjs');
-const mongoose = require('mongoose');
 const inMemoryStore = require('../inMemoryStore');
 const generateToken = require('../utils/generateToken');
+const { isMongoStorage } = require('../config/storageMode');
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
@@ -25,7 +25,7 @@ exports.register = async (req, res) => {
     const normalizedEmail = email.trim().toLowerCase();
 
     let existingCustomer = null;
-    if (mongoose.connection.readyState === 1) {
+    if (isMongoStorage()) {
       existingCustomer = await Customer.findOne({ email: normalizedEmail });
     } else {
       existingCustomer = inMemoryStore.findCustomerByEmail(normalizedEmail);
@@ -37,7 +37,7 @@ exports.register = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     let customer;
-    if (mongoose.connection.readyState === 1) {
+    if (isMongoStorage()) {
       customer = await Customer.create({
         fullName,
         email: normalizedEmail,
@@ -89,7 +89,7 @@ exports.login = async (req, res) => {
     const normalizedEmail = email.trim().toLowerCase();
 
     let customer = null;
-    if (mongoose.connection.readyState === 1) {
+    if (isMongoStorage()) {
       customer = await Customer.findOne({ email: normalizedEmail });
     } else {
       customer = inMemoryStore.findCustomerByEmail(normalizedEmail);

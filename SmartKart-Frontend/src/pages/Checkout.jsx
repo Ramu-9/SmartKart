@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   ShieldCheck,
@@ -128,12 +128,12 @@ const Checkout = () => {
   } = useCart();
 
   const [formData, setFormData] = useState({
-    fullName: 'Aarav Sharma',
-    phone: '9876543210',
-    addressLine1: '22 MG Road, Indiranagar',
-    city: 'Bengaluru',
-    state: 'Karnataka',
-    pincode: '560038'
+    fullName: '',
+    phone: '',
+    addressLine1: '',
+    city: '',
+    state: '',
+    pincode: ''
   });
 
   const [errors, setErrors] = useState({});
@@ -143,12 +143,11 @@ const Checkout = () => {
   // Razorpay Gateway & QR Scanner state
   const [razorpaySession, setRazorpaySession] = useState(null);
   const [paymentMethodTab, setPaymentMethodTab] = useState('qr'); // 'qr' | 'upi' | 'card'
-  const [upiId, setUpiId] = useState('aarav.sharma@okicici');
+  const [upiId, setUpiId] = useState('');
   const [qrScanStage, setQrScanStage] = useState('ready'); // 'ready' | 'scanning' | 'verifying'
   const [qrSecondsLeft, setQrSecondsLeft] = useState(600);
-  const autoInitRef = useRef(false);
 
-  // Prefill name & phone from logged-in customer profile
+  // Prefill name & phone from logged-in customer profile if present
   useEffect(() => {
     let mounted = true;
     customerApi
@@ -157,8 +156,8 @@ const Checkout = () => {
         if (!mounted || !res.data) return;
         setFormData((prev) => ({
           ...prev,
-          fullName: res.data.fullName || prev.fullName,
-          phone: res.data.phone || prev.phone
+          fullName: prev.fullName || res.data.fullName || '',
+          phone: prev.phone || res.data.phone || ''
         }));
       })
       .catch(() => {});
@@ -166,37 +165,6 @@ const Checkout = () => {
       mounted = false;
     };
   }, []);
-
-  // Automatically create Razorpay payment order on Checkout load so the Razorpay QR Scanner is immediately ready
-  useEffect(() => {
-    if (autoInitRef.current) return;
-    if (!cart || cart.length === 0) return;
-    autoInitRef.current = true;
-
-    setIsProcessing(true);
-    orderApi
-      .post('/create-payment-order', {
-        shippingAddress: {
-          fullName: formData.fullName.trim() || 'Aarav Sharma',
-          phone: formData.phone.trim() || '9876543210',
-          addressLine1: formData.addressLine1.trim() || '22 MG Road, Indiranagar',
-          city: formData.city.trim() || 'Bengaluru',
-          state: formData.state.trim() || 'Karnataka',
-          pincode: formData.pincode.trim() || '560038'
-        }
-      })
-      .then((res) => {
-        setRazorpaySession(res.data);
-      })
-      .catch((err) => {
-        setServerError(
-          err.response?.data?.message || 'Could not initialize Razorpay order. Click Refresh QR below.'
-        );
-      })
-      .finally(() => {
-        setIsProcessing(false);
-      });
-  }, [cart, formData]);
 
   // Countdown timer when Razorpay QR Scanner is open
   useEffect(() => {
@@ -267,7 +235,7 @@ const Checkout = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  // Refresh or create a fresh Razorpay order if needed
+  // Create or reuse a validated payment order
   const ensureRazorpayOrder = async () => {
     if (razorpaySession) return razorpaySession;
     const response = await orderApi.post('/create-payment-order', {
@@ -284,25 +252,121 @@ const Checkout = () => {
     return response.data;
   };
 
-  // Complete payment via Razorpay QR Scanner or UPI ID (verifies HMAC-SHA256 signature on backend)
-  const handleCompleteQrOrUpiPayment = async (sourceLabel = 'Razorpay QR Scanner') => {
+  // Launch Official Hosted Razorpay Checkout JS Popup (for live Razorpay orders)
+  const openOfficialRazorpayModal = async (session) => {
+    const { shopKartOrderId, razorpayOrderId, amount, currency, key } = session;
+    const scriptLoaded = await loadRazorpayScript();
+
+    if (!scriptLoaded || !window.Razorpay || !key) {
+      setIsProcessing(false);
+      setQrScanStage('ready');
+      setServerError('Unable to load Razorpay Checkout SDK. Please check your connection and try again.');
+      return;
+    }
+
+    const options = {
+      key: key,
+      amount: amount,
+      currency: currency,
+      name: UI_STRINGS.brandName,
+      description: `Order #${String(shopKartOrderId).slice(-6)}`,
+      order_id: razorpayOrderId,
+      prefill: {
+        name: formData.fullName.trim(),
+        contact: formData.phone.trim()
+      },
+      theme: {
+        color: '#072654'
+      },
+      handler: async function (paymentResponse) {
+        try {
+          const verifyRes = await orderApi.post('/verify-payment', {
+            shopKartOrderId,
+            razorpay_order_id: paymentResponse.razorpay_order_id,
+            razorpay_payment_id: paymentResponse.razorpay_payment_id,
+            razorpay_signature: paymentResponse.razorpay_signature,
+            shippingAddress: {
+              fullName: formData.fullName.trim(),
+              phone: formData.phone.trim(),
+              addressLine1: formData.addressLine1.trim(),
+              city: formData.city.trim(),
+              state: formData.state.trim(),
+              pincode: formData.pincode.trim()
+            }
+          });
+
+          if (verifyRes.data.success) {
+            clearCart();
+            showToast('Razorpay payment verified! Redirecting...', 'success');
+            navigate(`/order-success/${shopKartOrderId}`);
+          } else {
+            setServerError(verifyRes.data.message || 'Payment verification failed.');
+          }
+        } catch (err) {
+          setServerError(
+            err.response?.data?.message ||
+              'Payment verification failed. Your cart was preserved.'
+          );
+        } finally {
+          setIsProcessing(false);
+          setQrScanStage('ready');
+        }
+      },
+      modal: {
+        ondismiss: function () {
+          setIsProcessing(false);
+          setQrScanStage('ready');
+        }
+      }
+    };
+
+    const paymentObject = new window.Razorpay(options);
+    paymentObject.on('payment.failed', function (failRes) {
+      setServerError(
+        `Payment failed: ${
+          failRes.error?.description || 'Transaction declined'
+        }. Your cart has not been cleared.`
+      );
+      setIsProcessing(false);
+      setQrScanStage('ready');
+    });
+
+    paymentObject.open();
+  };
+
+  // Handle payment initiation: uses real Razorpay Checkout when live keys are configured,
+  // or explicit non-production simulation when simulationMode is active
+  const handleCompleteQrOrUpiPayment = async (sourceLabel = 'Simulated Test Checkout') => {
     setServerError('');
     if (!validateForm()) {
       setServerError('Please complete all required shipping address fields before paying.');
       return;
     }
 
-    setQrScanStage('scanning');
+    setIsProcessing(true);
 
     try {
       const session = await ensureRazorpayOrder();
 
+      // If backed by a live Razorpay order, always use genuine Razorpay Checkout verification
+      if (session.isLiveRazorpayOrder && session.razorpayOrderId && !session.razorpayOrderId.startsWith('order_sim_')) {
+        await openOfficialRazorpayModal(session);
+        return;
+      }
+
+      if (!session.simulationMode) {
+        setIsProcessing(false);
+        setServerError('Simulated payments are disabled in this environment.');
+        return;
+      }
+
+      setQrScanStage('scanning');
+
       setTimeout(async () => {
         setQrScanStage('verifying');
         try {
-          const paymentId =
-            session.qrPaymentId || 'pay_qr_' + Math.random().toString(36).substring(2, 10);
-          const signature = session.qrSignature || 'sim_sig_' + session.razorpayOrderId;
+          const paymentId = 'pay_sim_' + Math.random().toString(36).substring(2, 10);
+          const signature = 'sim_sig_' + session.razorpayOrderId;
 
           const verifyRes = await orderApi.post('/verify-payment', {
             shopKartOrderId: session.shopKartOrderId,
@@ -321,10 +385,10 @@ const Checkout = () => {
 
           if (verifyRes.data.success) {
             clearCart();
-            showToast(`Payment verified via ${sourceLabel}!`, 'success');
+            showToast(`Simulated test payment completed (${sourceLabel})`, 'success');
             navigate(`/order-success/${session.shopKartOrderId}`);
           } else {
-            setServerError(verifyRes.data.message || 'Razorpay payment verification failed.');
+            setServerError(verifyRes.data.message || 'Payment verification failed.');
             setQrScanStage('ready');
           }
         } catch (err) {
@@ -332,11 +396,14 @@ const Checkout = () => {
             err.response?.data?.message || 'Payment verification failed. Your cart was preserved.'
           );
           setQrScanStage('ready');
+        } finally {
+          setIsProcessing(false);
         }
-      }, 850);
+      }, 600);
     } catch (err) {
+      setIsProcessing(false);
       setServerError(
-        err.response?.data?.message || 'Unable to create Razorpay order. Please try again.'
+        err.response?.data?.message || 'Unable to create payment order. Please try again.'
       );
       setQrScanStage('ready');
     }
@@ -354,84 +421,10 @@ const Checkout = () => {
 
     try {
       const session = await ensureRazorpayOrder();
-      const { shopKartOrderId, razorpayOrderId, amount, currency, key } = session;
-      const scriptLoaded = await loadRazorpayScript();
-
-      if (
-        scriptLoaded &&
-        window.Razorpay &&
-        razorpayOrderId &&
-        !razorpayOrderId.startsWith('order_sim_')
-      ) {
-        const options = {
-          key: key,
-          amount: amount,
-          currency: currency,
-          name: UI_STRINGS.brandName,
-          description: `Order #${shopKartOrderId.slice(-6)}`,
-          order_id: razorpayOrderId,
-          prefill: {
-            name: formData.fullName,
-            contact: formData.phone,
-            email: 'customer@smartkart.in'
-          },
-          theme: {
-            color: '#072654'
-          },
-          handler: async function (paymentResponse) {
-            try {
-              const verifyRes = await orderApi.post('/verify-payment', {
-                shopKartOrderId,
-                razorpay_order_id: paymentResponse.razorpay_order_id || razorpayOrderId,
-                razorpay_payment_id: paymentResponse.razorpay_payment_id,
-                razorpay_signature: paymentResponse.razorpay_signature,
-                shippingAddress: {
-                  fullName: formData.fullName.trim(),
-                  phone: formData.phone.trim(),
-                  addressLine1: formData.addressLine1.trim(),
-                  city: formData.city.trim(),
-                  state: formData.state.trim(),
-                  pincode: formData.pincode.trim()
-                }
-              });
-
-              if (verifyRes.data.success) {
-                clearCart();
-                showToast('Razorpay payment verified! Redirecting...', 'success');
-                navigate(`/order-success/${shopKartOrderId}`);
-              } else {
-                setServerError(verifyRes.data.message || 'Payment verification failed.');
-              }
-            } catch (err) {
-              setServerError(
-                err.response?.data?.message ||
-                  'Payment verification failed. Your cart was preserved.'
-              );
-            } finally {
-              setIsProcessing(false);
-            }
-          },
-          modal: {
-            ondismiss: function () {
-              setIsProcessing(false);
-            }
-          }
-        };
-
-        const paymentObject = new window.Razorpay(options);
-        paymentObject.on('payment.failed', function (failRes) {
-          setServerError(
-            `Payment failed: ${
-              failRes.error?.description || 'Transaction declined'
-            }. Your cart has not been cleared.`
-          );
-          setIsProcessing(false);
-        });
-
-        paymentObject.open();
+      if (session.isLiveRazorpayOrder && session.razorpayOrderId && !session.razorpayOrderId.startsWith('order_sim_')) {
+        await openOfficialRazorpayModal(session);
       } else {
-        setIsProcessing(false);
-        handleCompleteQrOrUpiPayment('Razorpay Gateway');
+        await handleCompleteQrOrUpiPayment('Non-Production Test Simulation');
       }
     } catch (err) {
       setIsProcessing(false);
@@ -667,8 +660,12 @@ const Checkout = () => {
                         <strong>{razorpaySession?.razorpayOrderId || 'Initializing...'}</strong>
                       </div>
                       <div>
-                        <span>Razorpay Key:</span>
-                        <strong>{razorpaySession?.key || 'rzp_test_TunWSNvxg0TTPd'}</strong>
+                        <span>Payment Mode:</span>
+                        <strong>
+                          {razorpaySession?.isLiveRazorpayOrder
+                            ? `Razorpay (${razorpaySession.key})`
+                            : 'Non-Production Test Simulation'}
+                        </strong>
                       </div>
                     </div>
 

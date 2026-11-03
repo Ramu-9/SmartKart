@@ -1,8 +1,8 @@
-const mongoose = require('mongoose');
 const ProductReview = require('../models/productReview.model');
 const Product = require('../models/product.model');
 const Order = require('../models/order.model');
 const inMemoryStore = require('../inMemoryStore');
+const { isMongoStorage } = require('../config/storageMode');
 
 const isValidObjectId = (id) => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id);
 
@@ -43,7 +43,7 @@ function calculateReviewStats(reviewsList) {
 
 async function checkCustomerVerifiedPurchase(userId, productId) {
   if (!userId || !productId) return false;
-  if (mongoose.connection.readyState === 1) {
+  if (isMongoStorage()) {
     const paidOrder = await Order.findOne({
       user: userId,
       paymentStatus: 'PAID',
@@ -62,7 +62,7 @@ async function getProductReviews(productId) {
   }
 
   let reviews = [];
-  if (mongoose.connection.readyState === 1) {
+  if (isMongoStorage()) {
     reviews = await ProductReview.find({
       product: productId,
       moderationStatus: 'APPROVED'
@@ -94,7 +94,7 @@ async function createProductReview(user, productId, payload) {
   }
 
   // Verify product exists
-  const product = mongoose.connection.readyState === 1
+  const product = isMongoStorage()
     ? await Product.findById(productId).lean()
     : inMemoryStore.getProductById(productId);
 
@@ -127,7 +127,7 @@ async function createProductReview(user, productId, payload) {
   }
 
   // Check duplicate review
-  const existing = mongoose.connection.readyState === 1
+  const existing = isMongoStorage()
     ? await ProductReview.findOne({ product: productId, customer: user._id }).lean()
     : inMemoryStore.findCustomerReview(productId, user._id);
 
@@ -142,7 +142,7 @@ async function createProductReview(user, productId, payload) {
   const source = isVerified ? 'VERIFIED_PURCHASE' : 'CUSTOMER_REVIEW';
 
   let created;
-  if (mongoose.connection.readyState === 1) {
+  if (isMongoStorage()) {
     const doc = await ProductReview.create({
       product: productId,
       customer: user._id,
@@ -188,12 +188,12 @@ async function updateProductReview(user, reviewId, payload) {
     throw err;
   }
 
-  const existing = mongoose.connection.readyState === 1
+  const existing = isMongoStorage()
     ? await ProductReview.findById(reviewId)
     : inMemoryStore.getReviewById(reviewId);
 
   if (!existing) {
-    const err = new Error('Review not found');
+    const err = new Error('Product review not found');
     err.status = 404;
     throw err;
   }
@@ -236,7 +236,7 @@ async function updateProductReview(user, reviewId, payload) {
   }
 
   let updatedReview;
-  if (mongoose.connection.readyState === 1) {
+  if (isMongoStorage()) {
     Object.assign(existing, updates);
     await existing.save();
     updatedReview = existing.toObject();
@@ -264,7 +264,7 @@ async function deleteProductReview(user, reviewId) {
     throw err;
   }
 
-  const existing = mongoose.connection.readyState === 1
+  const existing = isMongoStorage()
     ? await ProductReview.findById(reviewId)
     : inMemoryStore.getReviewById(reviewId);
 
@@ -282,7 +282,7 @@ async function deleteProductReview(user, reviewId) {
 
   const productId = existing.product.toString();
 
-  if (mongoose.connection.readyState === 1) {
+  if (isMongoStorage()) {
     await ProductReview.findByIdAndDelete(reviewId);
   } else {
     inMemoryStore.deleteReview(reviewId);

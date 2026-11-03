@@ -2123,19 +2123,27 @@
 }
 
 .home-intelligence-title {
-  color: #FFFFFF !important;
+  color: var(--text-main);
   font-size: clamp(1.95rem, 3.2vw, 2.65rem);
   font-weight: 800;
   line-height: 1.15;
   margin-bottom: 0.75rem;
 }
 
+.home-intelligence-banner .home-intelligence-title {
+  color: #FFFFFF !important;
+}
+
 .home-intelligence-desc {
-  color: #CBD5E1;
+  color: var(--text-secondary);
   font-size: 1rem;
   line-height: 1.6;
   margin-bottom: 1.65rem;
   max-width: 720px;
+}
+
+.home-intelligence-banner .home-intelligence-desc {
+  color: #CBD5E1;
 }
 
 .home-intelligence-form {
@@ -2150,9 +2158,9 @@
   min-width: 260px;
   padding: 0.9rem 1.2rem;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.09);
-  color: #FFFFFF;
+  border: 1.5px solid #CBD5E1;
+  background: #F8FAFC;
+  color: #0F172A;
   font-size: 0.96rem;
   font-family: inherit;
   outline: none;
@@ -2160,13 +2168,13 @@
 }
 
 .home-mission-input::placeholder {
-  color: #94A3B8;
+  color: #64748B;
 }
 
 .home-mission-input:focus {
-  border-color: #60A5FA;
-  background: rgba(255, 255, 255, 0.14);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+  border-color: #2563EB;
+  background: #FFFFFF;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
 }
 
 .home-generate-btn {
@@ -2209,11 +2217,11 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #94A3B8;
+  color: #334155;
 }
 
 .smart-shop-templates .templates-label {
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .templates-row {
@@ -2306,10 +2314,11 @@
 
 .home-feature-card h3 {
   font-size: 1.2rem;
+  color: #0F172A;
 }
 
 .home-feature-card p {
-  color: var(--text-muted);
+  color: #334155;
   font-size: 0.91rem;
   line-height: 1.55;
   flex: 1;

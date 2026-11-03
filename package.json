@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "npm run build:frontend && node index.js",
+    "dev": "node index.js",
     "build:frontend": "npm --prefix SmartKart-Frontend run build",
     "build": "npm run build:frontend",
     "lint": "npm --prefix SmartKart-Frontend run lint",

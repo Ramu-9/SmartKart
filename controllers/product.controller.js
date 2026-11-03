@@ -1,14 +1,14 @@
 const Product = require('../models/product.model');
 const ProductReview = require('../models/productReview.model');
-const mongoose = require('mongoose');
 const inMemoryStore = require('../inMemoryStore');
 const { getProductKnownTradeOffs } = require('../services/fallback.service');
+const { isMongoStorage } = require('../config/storageMode');
 
 exports.createProduct = async (req, res) => {
   try {
     const { name, description, price, category, image, stock } = req.body;
 
-    if (mongoose.connection.readyState === 1) {
+    if (isMongoStorage()) {
       const product = new Product({
         name,
         description,
@@ -42,7 +42,7 @@ exports.getProducts = async (req, res) => {
   try {
     const { search, category, sort } = req.query;
 
-    if (mongoose.connection.readyState === 1) {
+    if (isMongoStorage()) {
       let query = {};
       if (search) {
         query.name = { $regex: search, $options: 'i' };
@@ -120,7 +120,7 @@ exports.getProducts = async (req, res) => {
 
 exports.getProductById = async (req, res) => {
   try {
-    if (mongoose.connection.readyState === 1) {
+    if (isMongoStorage()) {
       const productDoc = await Product.findById(req.params.id).lean();
       if (!productDoc) {
         return res.status(404).json({ message: 'Product not found' });

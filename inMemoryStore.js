@@ -453,6 +453,18 @@ module.exports = {
     return orders.find(o => o._id.toString() === id.toString()) || null;
   },
 
+  getOrderByPaymentId(paymentId) {
+    if (!paymentId) return null;
+    return (
+      orders.find(
+        o =>
+          o.paymentStatus === 'PAID' &&
+          ((o.razorpayPaymentId && o.razorpayPaymentId.toString() === paymentId.toString()) ||
+            (o.paymentId && o.paymentId.toString() === paymentId.toString()))
+      ) || null
+    );
+  },
+
   getOrdersByUser(userId) {
     return orders
       .filter(o => o.user.toString() === userId.toString())

@@ -1,13 +1,77 @@
 const crypto = require('crypto');
-const mongoose = require('mongoose');
 const Order = require('../models/order.model');
 const Customer = require('../models/customer.model');
 const Product = require('../models/product.model');
 const razorpay = require('../config/razorpay');
 const inMemoryStore = require('../inMemoryStore');
 const aiCommerceService = require('../services/aiCommerce.service');
+const { isMongoStorage } = require('../config/storageMode');
 
 const isValidObjectId = (id) => /^[0-9a-fA-F]{24}$/.test(id);
+
+const hasLiveRazorpayKeys = () =>
+  Boolean(
+    process.env.RAZORPAY_KEY_ID &&
+      process.env.RAZORPAY_KEY_SECRET &&
+      process.env.RAZORPAY_KEY_ID !== 'rzp_test_placeholder' &&
+      !process.env.RAZORPAY_KEY_ID.includes('your_razorpay') &&
+      !process.env.RAZORPAY_KEY_ID.includes('placeholder') &&
+      process.env.RAZORPAY_KEY_SECRET !== 'razorpay_secret_placeholder' &&
+      !process.env.RAZORPAY_KEY_SECRET.includes('your_razorpay') &&
+      !process.env.RAZORPAY_KEY_SECRET.includes('placeholder')
+  );
+
+const isSimulationAllowed = () => {
+  if (process.env.ALLOW_SIMULATED_PAYMENTS === 'true') return true;
+  if (process.env.ALLOW_SIMULATED_PAYMENTS === 'false') return false;
+  return process.env.NODE_ENV !== 'production';
+};
+
+const verifyPaymentSignature = ({ orderRazorpayId, razorpay_order_id, razorpay_payment_id, razorpay_signature }) => {
+  if (!razorpay_order_id || String(razorpay_order_id) !== String(orderRazorpayId)) {
+    return { valid: false, message: 'Razorpay order ID mismatch' };
+  }
+
+  if (!razorpay_signature || typeof razorpay_signature !== 'string') {
+    return { valid: false, message: 'Invalid payment signature' };
+  }
+
+  const isSimulatedSignature = razorpay_signature === `sim_sig_${orderRazorpayId}`;
+  const isSimulatedOrder = String(orderRazorpayId).startsWith('order_sim_');
+
+  if (isSimulatedSignature) {
+    if (!isSimulationAllowed()) {
+      return { valid: false, message: 'Simulated payment signatures are disabled in production' };
+    }
+    if (!isSimulatedOrder && hasLiveRazorpayKeys() && process.env.NODE_ENV !== 'test') {
+      return { valid: false, message: 'Simulated signature is not valid for a live Razorpay order' };
+    }
+    return { valid: true, isSimulated: true };
+  }
+
+  const keySecret = process.env.RAZORPAY_KEY_SECRET;
+  if (!keySecret || keySecret === 'razorpay_secret_placeholder' || keySecret.includes('placeholder')) {
+    return { valid: false, message: 'Razorpay secret key is not configured for signature verification' };
+  }
+
+  const body = `${orderRazorpayId}|${razorpay_payment_id}`;
+  const expectedSignature = crypto
+    .createHmac('sha256', keySecret)
+    .update(body)
+    .digest('hex');
+
+  const expectedBuffer = Buffer.from(expectedSignature, 'utf8');
+  const receivedBuffer = Buffer.from(String(razorpay_signature), 'utf8');
+
+  if (
+    expectedBuffer.length !== receivedBuffer.length ||
+    !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
+  ) {
+    return { valid: false, message: 'Invalid payment signature' };
+  }
+
+  return { valid: true, isSimulated: false };
+};
 
 exports.createPaymentOrder = async (req, res) => {
   try {
@@ -39,7 +103,7 @@ exports.createPaymentOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Pincode must contain 6 digits' });
     }
 
-    if (mongoose.connection.readyState !== 1) {
+    if (!isMongoStorage()) {
       const user = inMemoryStore.getCustomerById(userId);
       if (!user) {
         return res.status(404).json({ success: false, message: 'User not found' });
@@ -88,13 +152,7 @@ exports.createPaymentOrder = async (req, res) => {
       let razorpayOrderId = 'order_sim_' + Math.random().toString(36).substring(2, 14);
       let isLiveRazorpayOrder = false;
 
-      if (
-        process.env.NODE_ENV !== 'test' &&
-        process.env.RAZORPAY_KEY_ID &&
-        process.env.RAZORPAY_KEY_SECRET &&
-        process.env.RAZORPAY_KEY_ID !== 'rzp_test_placeholder' &&
-        !process.env.RAZORPAY_KEY_ID.includes('your_razorpay')
-      ) {
+      if (process.env.NODE_ENV !== 'test' && hasLiveRazorpayKeys()) {
         try {
           const rzpOrder = await razorpay.orders.create({
             amount: amountInPaise,
@@ -106,19 +164,23 @@ exports.createPaymentOrder = async (req, res) => {
             isLiveRazorpayOrder = true;
           }
         } catch (rzpErr) {
+          if (!isSimulationAllowed()) {
+            return res.status(503).json({
+              success: false,
+              message: 'Payment gateway unavailable. Please try again later.'
+            });
+          }
           console.log(
-            'Razorpay order creation fallback:',
+            'Razorpay order creation fallback (non-production simulation):',
             rzpErr?.error?.description || rzpErr?.message || rzpErr
           );
         }
+      } else if (!isSimulationAllowed()) {
+        return res.status(503).json({
+          success: false,
+          message: 'Payment gateway is not configured for production.'
+        });
       }
-
-      const keySecret = process.env.RAZORPAY_KEY_SECRET || 'razorpay_secret_placeholder';
-      const qrPaymentId = 'pay_qr_' + Math.random().toString(36).substring(2, 12);
-      const qrSignature = crypto
-        .createHmac('sha256', keySecret)
-        .update(`${razorpayOrderId}|${qrPaymentId}`)
-        .digest('hex');
 
       const order = inMemoryStore.createOrder({
         user: userId,
@@ -146,15 +208,14 @@ exports.createPaymentOrder = async (req, res) => {
         shopKartOrderId: order._id,
         razorpayOrderId,
         isLiveRazorpayOrder,
-        qrPaymentId,
-        qrSignature,
+        simulationMode: !isLiveRazorpayOrder,
         subtotalAmount: calculatedSubtotal,
         discountPercent: discountValidation.discountPercent,
         discountAmount: discountValidation.discountAmount,
         finalAmountINR,
         amount: amountInPaise,
         currency: 'INR',
-        key: process.env.RAZORPAY_KEY_ID || 'rzp_test_placeholder'
+        key: isLiveRazorpayOrder ? process.env.RAZORPAY_KEY_ID : null
       });
     }
 
@@ -209,6 +270,40 @@ exports.createPaymentOrder = async (req, res) => {
     const activeCart = user.cart.filter(item => item.product != null);
     const discountValidation = await aiCommerceService.getValidatedCartDiscount(userId, activeCart);
     const finalAmountINR = discountValidation.finalTotal;
+    const amountInPaise = Math.round(finalAmountINR * 100);
+
+    let razorpayOrderId = 'order_sim_' + Math.random().toString(36).substring(2, 14);
+    let isLiveRazorpayOrder = false;
+
+    if (process.env.NODE_ENV !== 'test' && hasLiveRazorpayKeys()) {
+      try {
+        const rzpOrder = await razorpay.orders.create({
+          amount: amountInPaise,
+          currency: 'INR',
+          receipt: 'rcpt_' + Date.now()
+        });
+        if (rzpOrder && rzpOrder.id) {
+          razorpayOrderId = rzpOrder.id;
+          isLiveRazorpayOrder = true;
+        }
+      } catch (rzpErr) {
+        if (!isSimulationAllowed()) {
+          return res.status(503).json({
+            success: false,
+            message: 'Payment gateway unavailable. Please try again later.'
+          });
+        }
+        console.warn(
+          'Razorpay order creation fallback (non-production simulation):',
+          rzpErr?.error?.description || rzpErr?.message || rzpErr
+        );
+      }
+    } else if (!isSimulationAllowed()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Payment gateway is not configured for production.'
+      });
+    }
 
     const shopKartOrder = new Order({
       user: userId,
@@ -227,39 +322,10 @@ exports.createPaymentOrder = async (req, res) => {
       appliedOfferId: discountValidation.activeOffer?.offerId || null,
       totalAmount: finalAmountINR,
       paymentStatus: 'PENDING',
-      status: 'PENDING_PAYMENT'
+      status: 'PENDING_PAYMENT',
+      razorpayOrderId
     });
 
-    await shopKartOrder.save();
-
-    const amountInPaise = Math.round(finalAmountINR * 100);
-    let razorpayOrderId = null;
-    let isLiveRazorpayOrder = false;
-
-    try {
-      const rzpOrder = await razorpay.orders.create({
-        amount: amountInPaise,
-        currency: 'INR',
-        receipt: shopKartOrder._id.toString()
-      });
-      razorpayOrderId = rzpOrder.id;
-      isLiveRazorpayOrder = true;
-    } catch (rzpErr) {
-      console.warn(
-        'Razorpay order creation fallback:',
-        rzpErr?.error?.description || rzpErr?.message || rzpErr
-      );
-      razorpayOrderId = 'order_sim_' + Math.random().toString(36).substring(2, 14);
-    }
-
-    const keySecret = process.env.RAZORPAY_KEY_SECRET || 'razorpay_secret_placeholder';
-    const qrPaymentId = 'pay_qr_' + Math.random().toString(36).substring(2, 12);
-    const qrSignature = crypto
-      .createHmac('sha256', keySecret)
-      .update(`${razorpayOrderId}|${qrPaymentId}`)
-      .digest('hex');
-
-    shopKartOrder.razorpayOrderId = razorpayOrderId;
     await shopKartOrder.save();
 
     res.status(200).json({
@@ -267,15 +333,14 @@ exports.createPaymentOrder = async (req, res) => {
       shopKartOrderId: shopKartOrder._id,
       razorpayOrderId: razorpayOrderId,
       isLiveRazorpayOrder,
-      qrPaymentId,
-      qrSignature,
+      simulationMode: !isLiveRazorpayOrder,
       subtotalAmount: calculatedSubtotal,
       discountPercent: discountValidation.discountPercent,
       discountAmount: discountValidation.discountAmount,
       finalAmountINR,
       amount: amountInPaise,
       currency: 'INR',
-      key: process.env.RAZORPAY_KEY_ID || 'rzp_test_placeholder'
+      key: isLiveRazorpayOrder ? process.env.RAZORPAY_KEY_ID : null
     });
   } catch (error) {
     console.error('Error creating payment order:', error);
@@ -296,7 +361,7 @@ exports.verifyPayment = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Missing Razorpay payment ID' });
     }
 
-    if (mongoose.connection.readyState !== 1) {
+    if (!isMongoStorage()) {
       const order = inMemoryStore.getOrderById(shopKartOrderId);
       if (!order) {
         return res.status(404).json({ success: false, message: 'Order not found' });
@@ -306,21 +371,32 @@ exports.verifyPayment = async (req, res) => {
         return res.status(403).json({ success: false, message: 'Access denied' });
       }
 
-      const keySecret = process.env.RAZORPAY_KEY_SECRET || 'razorpay_secret_placeholder';
-      const body = order.razorpayOrderId + '|' + razorpay_payment_id;
-      const expectedSignature = crypto
-        .createHmac('sha256', keySecret)
-        .update(body)
-        .digest('hex');
+      if (order.paymentStatus === 'PAID') {
+        return res.status(409).json({
+          success: false,
+          message: 'Order has already been paid and verified'
+        });
+      }
 
-      const isSimulatedTest = razorpay_signature === ('sim_sig_' + order.razorpayOrderId);
-      const isValidSignature = (expectedSignature === razorpay_signature) || isSimulatedTest;
+      if (inMemoryStore.getOrderByPaymentId(razorpay_payment_id)) {
+        return res.status(409).json({
+          success: false,
+          message: 'Payment ID has already been processed'
+        });
+      }
 
-      if (!isValidSignature) {
+      const verification = verifyPaymentSignature({
+        orderRazorpayId: order.razorpayOrderId,
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature
+      });
+
+      if (!verification.valid) {
         inMemoryStore.updateOrder(shopKartOrderId, { paymentStatus: 'FAILED' });
         return res.status(400).json({
           success: false,
-          message: 'Invalid payment signature'
+          message: verification.message || 'Invalid payment signature'
         });
       }
 
@@ -351,6 +427,7 @@ exports.verifyPayment = async (req, res) => {
       return res.status(200).json({
         success: true,
         message: 'Payment verified and order placed successfully',
+        isSimulatedPayment: Boolean(verification.isSimulated),
         order: inMemoryStore.getOrderById(shopKartOrderId)
       });
     }
@@ -360,22 +437,37 @@ exports.verifyPayment = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    const keySecret = process.env.RAZORPAY_KEY_SECRET || 'razorpay_secret_placeholder';
-    const body = order.razorpayOrderId + '|' + razorpay_payment_id;
-    const expectedSignature = crypto
-      .createHmac('sha256', keySecret)
-      .update(body)
-      .digest('hex');
+    if (order.paymentStatus === 'PAID') {
+      return res.status(409).json({
+        success: false,
+        message: 'Order has already been paid and verified'
+      });
+    }
 
-    const isSimulatedTest = razorpay_signature === ('sim_sig_' + order.razorpayOrderId);
-    const isValidSignature = (expectedSignature === razorpay_signature) || isSimulatedTest;
+    const existingPaidOrderWithPaymentId = await Order.findOne({
+      razorpayPaymentId: razorpay_payment_id,
+      paymentStatus: 'PAID'
+    });
+    if (existingPaidOrderWithPaymentId) {
+      return res.status(409).json({
+        success: false,
+        message: 'Payment ID has already been processed'
+      });
+    }
 
-    if (!isValidSignature) {
+    const verification = verifyPaymentSignature({
+      orderRazorpayId: order.razorpayOrderId,
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature
+    });
+
+    if (!verification.valid) {
       order.paymentStatus = 'FAILED';
       await order.save();
       return res.status(400).json({
         success: false,
-        message: 'Invalid payment signature'
+        message: verification.message || 'Invalid payment signature'
       });
     }
 
@@ -400,6 +492,7 @@ exports.verifyPayment = async (req, res) => {
     res.status(200).json({
       success: true,
       message: 'Payment verified and order placed successfully',
+      isSimulatedPayment: Boolean(verification.isSimulated),
       order: order
     });
   } catch (error) {
@@ -412,7 +505,7 @@ exports.getOrders = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    if (mongoose.connection.readyState !== 1) {
+    if (!isMongoStorage()) {
       const orders = inMemoryStore.getOrdersByUser(userId);
       return res.status(200).json({
         success: true,
@@ -441,7 +534,7 @@ exports.getOrderById = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid order ID' });
     }
 
-    if (mongoose.connection.readyState !== 1) {
+    if (!isMongoStorage()) {
       const order = inMemoryStore.getOrderById(id);
       if (!order) {
         return res.status(404).json({ success: false, message: 'Order not found' });
@@ -493,7 +586,7 @@ exports.updateOrderStatus = async (req, res) => {
       });
     }
 
-    if (mongoose.connection.readyState !== 1) {
+    if (!isMongoStorage()) {
       const order = inMemoryStore.updateOrder(id, { status });
       if (!order) {
         return res.status(404).json({ success: false, message: 'Order not found' });
@@ -523,3 +616,4 @@ exports.updateOrderStatus = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
+

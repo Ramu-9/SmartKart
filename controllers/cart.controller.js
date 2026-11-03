@@ -1,8 +1,8 @@
 const Customer = require('../models/customer.model');
 const Product = require('../models/product.model');
-const mongoose = require('mongoose');
 const inMemoryStore = require('../inMemoryStore');
 const aiCommerceService = require('../services/aiCommerce.service');
+const { isMongoStorage } = require('../config/storageMode');
 
 const getProductIdString = (productRef) => {
   if (!productRef) return '';
@@ -22,7 +22,7 @@ exports.addToCart = async (req, res) => {
     const requestedQty = req.body?.quantity !== undefined ? Number(req.body.quantity) : 1;
     const addQty = Number.isInteger(requestedQty) && requestedQty >= 1 ? requestedQty : 1;
 
-    if (mongoose.connection.readyState !== 1) {
+    if (!isMongoStorage()) {
       try {
         const updatedCart = inMemoryStore.addToCart(userId, productId, addQty);
         const discountState = await aiCommerceService.getValidatedCartDiscount(userId, updatedCart);
@@ -106,7 +106,7 @@ exports.getCart = async (req, res) => {
   try {
     const userId = req.user._id;
 
-    if (mongoose.connection.readyState !== 1) {
+    if (!isMongoStorage()) {
       const activeCart = inMemoryStore.getCart(userId);
       const discountState = await aiCommerceService.getValidatedCartDiscount(userId, activeCart);
       return res.status(200).json({
@@ -156,7 +156,7 @@ exports.updateQuantity = async (req, res) => {
       });
     }
 
-    if (mongoose.connection.readyState !== 1) {
+    if (!isMongoStorage()) {
       try {
         const updatedCart = inMemoryStore.updateCartQuantity(userId, productId, quantity);
         const discountState = await aiCommerceService.getValidatedCartDiscount(userId, updatedCart);
@@ -229,7 +229,7 @@ exports.removeFromCart = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid product ID' });
     }
 
-    if (mongoose.connection.readyState !== 1) {
+    if (!isMongoStorage()) {
       try {
         const updatedCart = inMemoryStore.removeFromCart(userId, productId);
         const discountState = await aiCommerceService.getValidatedCartDiscount(userId, updatedCart);
@@ -286,7 +286,7 @@ exports.removeFromCart = async (req, res) => {
 exports.removeDiscount = async (req, res) => {
   try {
     const userId = req.user._id;
-    if (mongoose.connection.readyState !== 1) {
+    if (!isMongoStorage()) {
       inMemoryStore.setCustomerDiscountOffer(userId, null);
       const activeCart = inMemoryStore.getCart(userId);
       return res.status(200).json({

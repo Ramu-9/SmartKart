@@ -599,4 +599,264 @@ describe('SmartKart 2.0 — Intelligent Commerce Platform Automated Test Suite',
       assert.equal(cartAfterGoodVerify.data.cart.length, 0, 'Persisted cart must be cleared after verified payment');
     });
   });
+
+  describe('7. Surgical Engineering Hardening: Payment Security, Replay Protection & JWT Validation', () => {
+    test('never leaks qrSignature or qrPaymentId from create-payment-order and blocks duplicate/replay payment verification (409) without double stock decrement', async () => {
+      const { cookie } = await registerAndLogin('replayguard');
+      const productId = '507f191e810c19729de860fd'; // Keychron K2 Wireless Mechanical Keyboard
+
+      const beforeProd = await apiRequest(`/products/${productId}`);
+      const initialStock = beforeProd.data.stock;
+
+      await apiRequest(`/cart/${productId}`, {
+        method: 'POST',
+        cookie,
+        body: { quantity: 1 }
+      });
+
+      const orderRes = await apiRequest('/orders/create-payment-order', {
+        method: 'POST',
+        cookie,
+        body: {
+          shippingAddress: {
+            fullName: 'Security Tester',
+            phone: '9876543210',
+            addressLine1: '100 Cyber Park',
+            city: 'Bengaluru',
+            state: 'Karnataka',
+            pincode: '560001'
+          }
+        }
+      });
+
+      assert.equal(orderRes.status, 200);
+      assert.equal(orderRes.data.qrSignature, undefined, 'Server must never leak pre-computed HMAC signature to client');
+      assert.equal(orderRes.data.qrPaymentId, undefined, 'Server must never leak pre-generated payment ID to client');
+
+      const { shopKartOrderId, razorpayOrderId } = orderRes.data;
+
+      // Mismatched razorpay_order_id must fail with 400
+      const mismatchOrderRes = await apiRequest('/orders/verify-payment', {
+        method: 'POST',
+        cookie,
+        body: {
+          shopKartOrderId,
+          razorpay_order_id: 'order_wrong_id_999',
+          razorpay_payment_id: 'pay_unique_101',
+          razorpay_signature: `sim_sig_${razorpayOrderId}`
+        }
+      });
+      assert.equal(mismatchOrderRes.status, 400);
+
+      // Valid first verification succeeds and decrements stock by 1
+      const paymentId = 'pay_replay_test_501';
+      const validSig = crypto
+        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+        .update(`${razorpayOrderId}|${paymentId}`)
+        .digest('hex');
+
+      const firstVerify = await apiRequest('/orders/verify-payment', {
+        method: 'POST',
+        cookie,
+        body: {
+          shopKartOrderId,
+          razorpay_order_id: razorpayOrderId,
+          razorpay_payment_id: paymentId,
+          razorpay_signature: validSig
+        }
+      });
+      assert.equal(firstVerify.status, 200);
+
+      const afterFirstProd = await apiRequest(`/products/${productId}`);
+      assert.equal(afterFirstProd.data.stock, initialStock - 1, 'Stock must decrement exactly once');
+
+      // Replaying the exact same verification request on an already PAID order must return 409 Conflict
+      const replaySameOrder = await apiRequest('/orders/verify-payment', {
+        method: 'POST',
+        cookie,
+        body: {
+          shopKartOrderId,
+          razorpay_order_id: razorpayOrderId,
+          razorpay_payment_id: paymentId,
+          razorpay_signature: validSig
+        }
+      });
+      assert.equal(replaySameOrder.status, 409);
+
+      const afterReplayProd = await apiRequest(`/products/${productId}`);
+      assert.equal(afterReplayProd.data.stock, initialStock - 1, 'Stock must NOT decrement a second time on replay');
+
+      // Creating a second order and attempting to reuse the already-processed paymentId must return 409 Conflict
+      await apiRequest(`/cart/${productId}`, {
+        method: 'POST',
+        cookie,
+        body: { quantity: 1 }
+      });
+      const secondOrderRes = await apiRequest('/orders/create-payment-order', {
+        method: 'POST',
+        cookie,
+        body: {
+          shippingAddress: {
+            fullName: 'Security Tester',
+            phone: '9876543210',
+            addressLine1: '100 Cyber Park',
+            city: 'Bengaluru',
+            state: 'Karnataka',
+            pincode: '560001'
+          }
+        }
+      });
+      assert.equal(secondOrderRes.status, 200);
+
+      const secondOrderSigWithReusedPaymentId = crypto
+        .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+        .update(`${secondOrderRes.data.razorpayOrderId}|${paymentId}`)
+        .digest('hex');
+
+      const reusePaymentIdRes = await apiRequest('/orders/verify-payment', {
+        method: 'POST',
+        cookie,
+        body: {
+          shopKartOrderId: secondOrderRes.data.shopKartOrderId,
+          razorpay_order_id: secondOrderRes.data.razorpayOrderId,
+          razorpay_payment_id: paymentId,
+          razorpay_signature: secondOrderSigWithReusedPaymentId
+        }
+      });
+      assert.equal(reusePaymentIdRes.status, 409, 'Reusing an already processed razorpay_payment_id on another order must fail with 409');
+    });
+
+    test('rejects simulated payment signatures (sim_sig_) when NODE_ENV is production and ALLOW_SIMULATED_PAYMENTS is not enabled', async () => {
+      const { cookie } = await registerAndLogin('prodsim');
+      const productId = '507f191e810c19729de860fe';
+
+      await apiRequest(`/cart/${productId}`, {
+        method: 'POST',
+        cookie,
+        body: { quantity: 1 }
+      });
+
+      const orderRes = await apiRequest('/orders/create-payment-order', {
+        method: 'POST',
+        cookie,
+        body: {
+          shippingAddress: {
+            fullName: 'Prod Sim Tester',
+            phone: '9876543210',
+            addressLine1: '12 MG Road',
+            city: 'Bengaluru',
+            state: 'Karnataka',
+            pincode: '560001'
+          }
+        }
+      });
+      assert.equal(orderRes.status, 200);
+      const { shopKartOrderId, razorpayOrderId } = orderRes.data;
+
+      const prevNodeEnv = process.env.NODE_ENV;
+      const prevAllowSim = process.env.ALLOW_SIMULATED_PAYMENTS;
+      try {
+        process.env.NODE_ENV = 'production';
+        delete process.env.ALLOW_SIMULATED_PAYMENTS;
+
+        const simAttemptInProd = await apiRequest('/orders/verify-payment', {
+          method: 'POST',
+          cookie,
+          body: {
+            shopKartOrderId,
+            razorpay_order_id: razorpayOrderId,
+            razorpay_payment_id: 'pay_sim_prod_attempt',
+            razorpay_signature: `sim_sig_${razorpayOrderId}`
+          }
+        });
+        assert.equal(simAttemptInProd.status, 400, 'Simulated payment signature must be rejected in production');
+      } finally {
+        process.env.NODE_ENV = prevNodeEnv;
+        if (prevAllowSim === undefined) {
+          delete process.env.ALLOW_SIMULATED_PAYMENTS;
+        } else {
+          process.env.ALLOW_SIMULATED_PAYMENTS = prevAllowSim;
+        }
+      }
+    });
+
+    test('enforces secure JWT_SECRET in production and rejects missing or known fallback secrets', () => {
+      const { getJwtSecret } = require('../utils/jwtConfig');
+      const prevNodeEnv = process.env.NODE_ENV;
+      const prevJwtSecret = process.env.JWT_SECRET;
+
+      try {
+        process.env.NODE_ENV = 'production';
+
+        delete process.env.JWT_SECRET;
+        assert.throws(
+          () => getJwtSecret(),
+          /FATAL: A strong JWT_SECRET/,
+          'Missing JWT_SECRET must throw in production'
+        );
+
+        process.env.JWT_SECRET = 'smartkart_jwt_secret_dev_key_2026';
+        assert.throws(
+          () => getJwtSecret(),
+          /FATAL: A strong JWT_SECRET/,
+          'Public hardcoded fallback JWT_SECRET must be rejected in production'
+        );
+
+        process.env.JWT_SECRET = 'short_secret';
+        assert.throws(
+          () => getJwtSecret(),
+          /FATAL: A strong JWT_SECRET/,
+          'Short JWT_SECRET (<16 chars) must be rejected in production'
+        );
+
+        process.env.JWT_SECRET = 'prod_strong_random_jwt_secret_value_2026_secure';
+        assert.equal(getJwtSecret(), 'prod_strong_random_jwt_secret_value_2026_secure');
+      } finally {
+        process.env.NODE_ENV = prevNodeEnv;
+        if (prevJwtSecret === undefined) {
+          delete process.env.JWT_SECRET;
+        } else {
+          process.env.JWT_SECRET = prevJwtSecret;
+        }
+      }
+    });
+
+    test('resolves explicit STORAGE_MODE deterministically and fails fast if STORAGE_MODE=mongodb has no MONGODB_URI', async () => {
+      const { initializeStorage, getActiveStorageMode, setActiveStorageModeForTest } = require('../config/storageMode');
+      const prevStorageMode = process.env.STORAGE_MODE;
+      const prevMongoUri = process.env.MONGODB_URI;
+
+      try {
+        setActiveStorageModeForTest(null);
+        process.env.STORAGE_MODE = 'mongodb';
+        delete process.env.MONGODB_URI;
+
+        await assert.rejects(
+          async () => await initializeStorage(),
+          /FATAL: STORAGE_MODE=mongodb requires a valid MONGODB_URI/,
+          'STORAGE_MODE=mongodb without MONGODB_URI must fail fast'
+        );
+
+        setActiveStorageModeForTest(null);
+        process.env.STORAGE_MODE = 'memory';
+        const mode = await initializeStorage();
+        assert.equal(mode, 'memory');
+        assert.equal(getActiveStorageMode(), 'memory');
+      } finally {
+        setActiveStorageModeForTest('memory');
+        if (prevStorageMode === undefined) {
+          delete process.env.STORAGE_MODE;
+        } else {
+          process.env.STORAGE_MODE = prevStorageMode;
+        }
+        if (prevMongoUri === undefined) {
+          delete process.env.MONGODB_URI;
+        } else {
+          process.env.MONGODB_URI = prevMongoUri;
+        }
+      }
+    });
+  });
 });
+
+
