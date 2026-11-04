@@ -1,7 +1,11 @@
 const Customer = require('../models/customer.model');
 const Product = require('../models/product.model');
 const inMemoryStore = require('../inMemoryStore');
-const { isMongoStorage } = require('../config/storageMode');
+const {
+  isMongoStorage,
+  assertMongoAvailable,
+  isDatabaseUnavailableError
+} = require('../config/storageMode');
 
 exports.addToWishlist = async (req, res) => {
   try {
@@ -27,6 +31,8 @@ exports.addToWishlist = async (req, res) => {
       }
     }
 
+    assertMongoAvailable();
+
     const product = await Product.findById(productId);
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product not found' });
@@ -43,6 +49,13 @@ exports.addToWishlist = async (req, res) => {
 
     res.status(200).json({ success: true, message: 'Product added to wishlist' });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     console.error('Error adding to wishlist:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
@@ -61,6 +74,8 @@ exports.getWishlist = async (req, res) => {
       });
     }
 
+    assertMongoAvailable();
+
     const user = await Customer.findById(userId).populate({
       path: 'wishlist',
       select: 'name price category image stock'
@@ -72,6 +87,13 @@ exports.getWishlist = async (req, res) => {
       wishlist: user.wishlist
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     console.error('Error getting wishlist:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
@@ -98,6 +120,8 @@ exports.removeFromWishlist = async (req, res) => {
       }
     }
 
+    assertMongoAvailable();
+
     const user = await Customer.findById(userId);
 
     if (!user.wishlist.includes(productId)) {
@@ -109,6 +133,13 @@ exports.removeFromWishlist = async (req, res) => {
 
     res.status(200).json({ success: true, message: 'Product removed from wishlist' });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     console.error('Error removing from wishlist:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
@@ -135,6 +166,8 @@ exports.toggleWishlist = async (req, res) => {
       }
     }
 
+    assertMongoAvailable();
+
     const product = await Product.findById(productId);
     if (!product) {
       return res.status(404).json({ success: false, message: 'Product not found' });
@@ -154,6 +187,13 @@ exports.toggleWishlist = async (req, res) => {
       return res.status(200).json({ success: true, saved: true, message: 'Product added to wishlist' });
     }
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     console.error('Error toggling wishlist:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }

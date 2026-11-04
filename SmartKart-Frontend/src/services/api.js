@@ -2,6 +2,8 @@ import axios from 'axios';
 
 export const TOKEN_STORAGE_KEY = 'smartkart_auth_token';
 
+const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+
 export const getAuthToken = () => {
   try {
     return localStorage.getItem(TOKEN_STORAGE_KEY);
@@ -42,48 +44,48 @@ const attachAuthInterceptor = (instance) => {
 
 export const customerApi = attachAuthInterceptor(
   axios.create({
-    baseURL: '/customers',
+    baseURL: `${API_ORIGIN}/customers`,
     withCredentials: true,
   })
 );
 
 export const productApi = attachAuthInterceptor(
   axios.create({
-    baseURL: '/products',
+    baseURL: `${API_ORIGIN}/products`,
   })
 );
 
 export const wishlistApi = attachAuthInterceptor(
   axios.create({
-    baseURL: '/wishlist',
+    baseURL: `${API_ORIGIN}/wishlist`,
     withCredentials: true,
   })
 );
 
 export const cartApi = attachAuthInterceptor(
   axios.create({
-    baseURL: '/cart',
+    baseURL: `${API_ORIGIN}/cart`,
     withCredentials: true,
   })
 );
 
 export const orderApi = attachAuthInterceptor(
   axios.create({
-    baseURL: '/orders',
+    baseURL: `${API_ORIGIN}/orders`,
     withCredentials: true,
   })
 );
 
 export const reviewApi = attachAuthInterceptor(
   axios.create({
-    baseURL: '/reviews',
+    baseURL: `${API_ORIGIN}/reviews`,
     withCredentials: true,
   })
 );
 
 export const aiApi = attachAuthInterceptor(
   axios.create({
-    baseURL: '/api/ai',
+    baseURL: `${API_ORIGIN}/api/ai`,
     withCredentials: true,
   })
 );

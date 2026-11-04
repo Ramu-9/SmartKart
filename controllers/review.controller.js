@@ -1,4 +1,5 @@
 const reviewService = require('../services/review.service');
+const { isDatabaseUnavailableError } = require('../config/storageMode');
 
 exports.getProductReviews = async (req, res) => {
   try {
@@ -10,6 +11,13 @@ exports.getProductReviews = async (req, res) => {
       stats: result.stats
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     const status = error.status || 500;
     res.status(status).json({
       success: false,
@@ -29,6 +37,13 @@ exports.createReview = async (req, res) => {
       stats: result.stats
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     const status = error.status || 500;
     res.status(status).json({
       success: false,
@@ -48,6 +63,13 @@ exports.updateReview = async (req, res) => {
       stats: result.stats
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     const status = error.status || 500;
     res.status(status).json({
       success: false,
@@ -66,6 +88,13 @@ exports.deleteReview = async (req, res) => {
       stats: result.stats
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     const status = error.status || 500;
     res.status(status).json({
       success: false,

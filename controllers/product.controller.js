@@ -2,13 +2,18 @@ const Product = require('../models/product.model');
 const ProductReview = require('../models/productReview.model');
 const inMemoryStore = require('../inMemoryStore');
 const { getProductKnownTradeOffs } = require('../services/fallback.service');
-const { isMongoStorage } = require('../config/storageMode');
+const {
+  isMongoStorage,
+  assertMongoAvailable,
+  isDatabaseUnavailableError
+} = require('../config/storageMode');
 
 exports.createProduct = async (req, res) => {
   try {
     const { name, description, price, category, image, stock } = req.body;
 
     if (isMongoStorage()) {
+      assertMongoAvailable();
       const product = new Product({
         name,
         description,
@@ -31,10 +36,17 @@ exports.createProduct = async (req, res) => {
       return res.status(201).json(savedProduct);
     }
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     if (error.name === 'ValidationError') {
       return res.status(400).json({ message: error.message });
     }
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Server error' });
   }
 };
 
@@ -43,6 +55,7 @@ exports.getProducts = async (req, res) => {
     const { search, category, sort } = req.query;
 
     if (isMongoStorage()) {
+      assertMongoAvailable();
       let query = {};
       if (search) {
         query.name = { $regex: search, $options: 'i' };
@@ -114,13 +127,21 @@ exports.getProducts = async (req, res) => {
       });
     }
   } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
+    res.status(500).json({ message: 'Server error' });
   }
 };
 
 exports.getProductById = async (req, res) => {
   try {
     if (isMongoStorage()) {
+      assertMongoAvailable();
       const productDoc = await Product.findById(req.params.id).lean();
       if (!productDoc) {
         return res.status(404).json({ message: 'Product not found' });
@@ -158,10 +179,16 @@ exports.getProductById = async (req, res) => {
       return res.json(product);
     }
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     if (error.name === 'CastError') {
       return res.status(400).json({ message: 'Invalid product ID' });
     }
-    res.status(500).json({ message: 'Server error', error: error.message });
+    res.status(500).json({ message: 'Server error' });
   }
 };
-

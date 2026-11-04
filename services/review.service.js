@@ -2,7 +2,7 @@ const ProductReview = require('../models/productReview.model');
 const Product = require('../models/product.model');
 const Order = require('../models/order.model');
 const inMemoryStore = require('../inMemoryStore');
-const { isMongoStorage } = require('../config/storageMode');
+const { isMongoStorage, assertMongoAvailable } = require('../config/storageMode');
 
 const isValidObjectId = (id) => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id);
 
@@ -44,6 +44,7 @@ function calculateReviewStats(reviewsList) {
 async function checkCustomerVerifiedPurchase(userId, productId) {
   if (!userId || !productId) return false;
   if (isMongoStorage()) {
+    assertMongoAvailable();
     const paidOrder = await Order.findOne({
       user: userId,
       paymentStatus: 'PAID',
@@ -63,6 +64,7 @@ async function getProductReviews(productId) {
 
   let reviews = [];
   if (isMongoStorage()) {
+    assertMongoAvailable();
     reviews = await ProductReview.find({
       product: productId,
       moderationStatus: 'APPROVED'
@@ -91,6 +93,10 @@ async function createProductReview(user, productId, payload) {
     const err = new Error('Invalid product ID');
     err.status = 400;
     throw err;
+  }
+
+  if (isMongoStorage()) {
+    assertMongoAvailable();
   }
 
   // Verify product exists
@@ -188,6 +194,10 @@ async function updateProductReview(user, reviewId, payload) {
     throw err;
   }
 
+  if (isMongoStorage()) {
+    assertMongoAvailable();
+  }
+
   const existing = isMongoStorage()
     ? await ProductReview.findById(reviewId)
     : inMemoryStore.getReviewById(reviewId);
@@ -262,6 +272,10 @@ async function deleteProductReview(user, reviewId) {
     const err = new Error('Invalid review ID');
     err.status = 400;
     throw err;
+  }
+
+  if (isMongoStorage()) {
+    assertMongoAvailable();
   }
 
   const existing = isMongoStorage()

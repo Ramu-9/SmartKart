@@ -5,12 +5,13 @@ const inMemoryStore = require('../inMemoryStore');
 const geminiService = require('./gemini.service');
 const fallbackService = require('./fallback.service');
 const reviewService = require('./review.service');
-const { isMongoStorage } = require('../config/storageMode');
+const { isMongoStorage, assertMongoAvailable } = require('../config/storageMode');
 
 const isValidObjectId = (id) => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id);
 
 async function fetchAllCatalogueProducts() {
   if (isMongoStorage()) {
+    assertMongoAvailable();
     return await Product.find({}).lean();
   }
   return inMemoryStore.getAllProducts();
@@ -19,6 +20,7 @@ async function fetchAllCatalogueProducts() {
 async function fetchProductById(productId) {
   if (!isValidObjectId(productId)) return null;
   if (isMongoStorage()) {
+    assertMongoAvailable();
     return await Product.findById(productId).lean();
   }
   return inMemoryStore.getProductById(productId);
@@ -27,6 +29,7 @@ async function fetchProductById(productId) {
 async function fetchPersistedCartForUser(userId) {
   if (!userId) return [];
   if (isMongoStorage()) {
+    assertMongoAvailable();
     const user = await Customer.findById(userId).populate({
       path: 'cart.product',
       select: 'sku name brand price category image stock description tags useCase attributes discountEligible'
@@ -263,6 +266,7 @@ async function applyApprovedProposal({ user, items }) {
   }
 
   if (isMongoStorage()) {
+    assertMongoAvailable();
     const customer = await Customer.findById(user._id);
     if (!customer) {
       const err = new Error('User not found');
@@ -446,6 +450,7 @@ async function negotiateCartDiscount({ user, message }) {
     : null;
 
   if (isMongoStorage()) {
+    assertMongoAvailable();
     await Customer.findByIdAndUpdate(user._id, {
       $set: { activeDiscountOffer: offer }
     });
@@ -488,6 +493,7 @@ async function getValidatedCartDiscount(userId, persistedCart) {
 
   let offer = null;
   if (isMongoStorage()) {
+    assertMongoAvailable();
     const cust = await Customer.findById(userId).lean();
     offer = cust?.activeDiscountOffer || null;
   } else {
@@ -828,6 +834,7 @@ async function replaceProductInPersistedCart({ user, oldProductId, newProductId 
   }
 
   if (isMongoStorage()) {
+    assertMongoAvailable();
     const customer = await Customer.findById(user._id);
     if (!customer) {
       const err = new Error('User not found');

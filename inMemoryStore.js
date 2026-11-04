@@ -460,6 +460,7 @@ module.exports = {
         o =>
           o.paymentStatus === 'PAID' &&
           ((o.razorpayPaymentId && o.razorpayPaymentId.toString() === paymentId.toString()) ||
+            (o.simulatedPaymentId && o.simulatedPaymentId.toString() === paymentId.toString()) ||
             (o.paymentId && o.paymentId.toString() === paymentId.toString()))
       ) || null
     );

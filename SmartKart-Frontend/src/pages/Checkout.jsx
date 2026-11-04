@@ -385,7 +385,10 @@ const Checkout = () => {
 
           if (verifyRes.data.success) {
             clearCart();
-            showToast(`Simulated test payment completed (${sourceLabel})`, 'success');
+            showToast(
+              `Simulated demo payment recorded (${sourceLabel} — not processed by Razorpay)`,
+              'success'
+            );
             navigate(`/order-success/${session.shopKartOrderId}`);
           } else {
             setServerError(verifyRes.data.message || 'Payment verification failed.');
@@ -510,11 +513,14 @@ const Checkout = () => {
                   <div className="rzp-merchant-name-row">
                     <h4>SmartKart Retail India</h4>
                     <span className="rzp-verified-pill">
-                      <ShieldCheck size={12} /> Razorpay Verified
+                      <ShieldCheck size={12} />{' '}
+                      {razorpaySession?.simulationMode
+                        ? 'Simulated Demo Mode'
+                        : 'Razorpay Verified'}
                     </span>
                   </div>
                   <p className="rzp-order-meta">
-                    Razorpay Order:{' '}
+                    {razorpaySession?.simulationMode ? 'Demo Order Ref:' : 'Razorpay Order:'}{' '}
                     <code>
                       {razorpaySession?.razorpayOrderId ||
                         (isProcessing ? 'Creating order...' : 'Ready')}
@@ -524,7 +530,9 @@ const Checkout = () => {
               </div>
 
               <div className="rzp-gateway-amount-box">
-                <span className="rzp-test-badge">TEST MODE</span>
+                <span className="rzp-test-badge">
+                  {razorpaySession?.simulationMode ? 'DEMO SIMULATION' : 'TEST MODE'}
+                </span>
                 <span className="rzp-amount-label">Total Payable</span>
                 <strong className="rzp-amount-value">
                   ₹{displayAmount.toLocaleString('en-IN')}
@@ -621,10 +629,16 @@ const Checkout = () => {
                         </div>
                         <strong>
                           {qrScanStage === 'scanning'
-                            ? 'QR Code Scanned!'
-                            : 'Verifying HMAC Signature...'}
+                            ? 'Simulated QR Scanned (Demo Mode)'
+                            : razorpaySession?.isLiveRazorpayOrder
+                            ? 'Verifying HMAC Signature...'
+                            : 'Recording Simulated Demo Payment...'}
                         </strong>
-                        <span>Communicating with Razorpay server</span>
+                        <span>
+                          {razorpaySession?.isLiveRazorpayOrder
+                            ? 'Communicating with Razorpay server'
+                            : 'Simulated demo checkout — not processed by Razorpay'}
+                        </span>
                       </div>
                     )}
                   </div>
@@ -664,7 +678,7 @@ const Checkout = () => {
                         <strong>
                           {razorpaySession?.isLiveRazorpayOrder
                             ? `Razorpay (${razorpaySession.key})`
-                            : 'Non-Production Test Simulation'}
+                            : 'Simulated Demo Payment (Not Processed by Razorpay)'}
                         </strong>
                       </div>
                     </div>
@@ -672,7 +686,7 @@ const Checkout = () => {
                     <button
                       type="button"
                       className="rzp-primary-pay-btn"
-                      onClick={() => handleCompleteQrOrUpiPayment('Razorpay QR Scanner')}
+                      onClick={() => handleCompleteQrOrUpiPayment('Demo QR Simulation')}
                       disabled={qrScanStage !== 'ready' || isProcessing}
                     >
                       {qrScanStage === 'ready' ? (
@@ -688,7 +702,9 @@ const Checkout = () => {
                           <span>
                             {qrScanStage === 'scanning'
                               ? 'QR Scanned · Processing...'
-                              : 'Verifying with Razorpay...'}
+                              : razorpaySession?.isLiveRazorpayOrder
+                              ? 'Verifying with Razorpay...'
+                              : 'Recording Simulated Demo Payment...'}
                           </span>
                         </>
                       )}

@@ -75,6 +75,23 @@ const orderSchema = new mongoose.Schema(
       default: 'PENDING'
     },
 
+    paymentMode: {
+      type: String,
+      enum: ['RAZORPAY', 'DEMO_SIMULATION'],
+      default: 'RAZORPAY'
+    },
+
+    paymentProvider: {
+      type: String,
+      enum: ['RAZORPAY', 'SIMULATED_DEMO'],
+      default: 'RAZORPAY'
+    },
+
+    isSimulatedPayment: {
+      type: Boolean,
+      default: false
+    },
+
     status: {
       type: String,
       enum: ['PENDING_PAYMENT', 'PLACED', 'CONFIRMED', 'SHIPPED', 'DELIVERED'],
@@ -85,7 +102,12 @@ const orderSchema = new mongoose.Schema(
       type: String
     },
     razorpayPaymentId: {
-      type: String
+      type: String,
+      default: null
+    },
+    simulatedPaymentId: {
+      type: String,
+      default: null
     }
   },
   { timestamps: true }

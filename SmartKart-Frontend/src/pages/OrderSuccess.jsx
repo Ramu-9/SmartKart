@@ -28,6 +28,11 @@ const OrderSuccess = () => {
   }, [id]);
 
   const currentStepIndex = Math.max(0, ORDER_STEPS.indexOf(order?.status || 'PLACED'));
+  const isSimulated = Boolean(
+    order?.isSimulatedPayment ||
+      order?.paymentMode === 'DEMO_SIMULATION' ||
+      (String(order?.razorpayOrderId || '').startsWith('order_sim_') && !order?.razorpayPaymentId)
+  );
 
   return (
     <div className="order-success-container">
@@ -38,8 +43,9 @@ const OrderSuccess = () => {
 
         <h1 className="success-title">Order Confirmed!</h1>
         <p className="success-message">
-          Thank you for your purchase. Your order has been placed in test mode (no real money
-          charged) and is now being prepared.
+          {isSimulated
+            ? 'Your order was placed using a Simulated Demo Payment (not processed or verified by Razorpay).'
+            : 'Thank you for your purchase. Your order has been placed in test mode (no real money charged) and is now being prepared.'}
         </p>
 
         {/* Order Status Timeline */}
@@ -88,8 +94,17 @@ const OrderSuccess = () => {
               </div>
 
               <div className="receipt-row">
+                <span className="receipt-label">Payment Mode:</span>
+                <span className="receipt-value">
+                  {isSimulated ? 'Simulated Demo Payment (Not Razorpay)' : 'Razorpay (Test Mode)'}
+                </span>
+              </div>
+
+              <div className="receipt-row">
                 <span className="receipt-label">Payment Status:</span>
-                <span className="badge badge-success">{order.paymentStatus}</span>
+                <span className="badge badge-success">
+                  {isSimulated ? 'PAID (SIMULATED DEMO)' : order.paymentStatus}
+                </span>
               </div>
 
               <div className="receipt-row">

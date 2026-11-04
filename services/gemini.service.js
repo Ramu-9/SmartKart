@@ -7,13 +7,19 @@ function setMockGenerator(fn) {
 }
 
 function getModelName() {
-  return process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+  return process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 }
 
 function isGeminiConfigured() {
   if (mockGenerator) return true;
   const key = (process.env.GEMINI_API_KEY || '').trim();
-  return Boolean(key && key !== 'your_gemini_api_key_here');
+  if (!key) return false;
+  const lower = key.toLowerCase();
+  return (
+    key !== 'your_gemini_api_key_here' &&
+    !lower.includes('your_gemini') &&
+    !lower.includes('placeholder')
+  );
 }
 
 function createClient() {

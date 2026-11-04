@@ -130,14 +130,15 @@ Copy `.env.example` to `.env`:
 
 ```env
 PORT=3000
+NODE_ENV=development
 JWT_EXPIRES_IN=7d
 # Required in production (minimum 16 characters, e.g. openssl rand -hex 32)
 JWT_SECRET=
 
 # Storage mode: auto | mongodb | memory
-# - mongodb: requires MONGODB_URI and fails fast on startup if unreachable
+# - mongodb: requires MONGODB_URI, fails fast on startup if unreachable, and never falls back to memory if disconnected
 # - memory: uses the built-in 38-product in-memory store
-# - auto (default): connects to MONGODB_URI when provided, otherwise uses in-memory store
+# - auto (default): connects to MONGODB_URI when provided at startup, otherwise uses in-memory store
 STORAGE_MODE=auto
 MONGODB_URI=
 
@@ -149,14 +150,21 @@ GEMINI_MODEL=gemini-2.5-flash
 RAZORPAY_KEY_ID=
 RAZORPAY_KEY_SECRET=
 
-# Explicitly allow simulated test payments only in non-production environments (true | false)
+# Explicitly allow simulated demo payments ONLY in non-production environments (true | false)
+# Never bypasses production safeguards when NODE_ENV=production
 ALLOW_SIMULATED_PAYMENTS=false
+
+# Optional: Allowed frontend origin(s) for split frontend/backend deployments
+CORS_ORIGIN=
 ```
 
-### 3. Production Security Requirements (`NODE_ENV=production`)
-- **`JWT_SECRET`**: Must be explicitly set to a strong secret ($\ge 16$ characters). There is no hardcoded public fallback secret; the server refuses to start in production if `JWT_SECRET` is missing or set to a placeholder.
-- **Payments**: Simulated payment orders and `sim_sig_*` signatures are rejected in production unless `ALLOW_SIMULATED_PAYMENTS=true` is explicitly configured for a staging sandbox.
-- **Database Seeding**: Startup catalogue seeding uses `$setOnInsert` so existing products, stock counts, customers, orders, and reviews in MongoDB are never overwritten or deleted.
+### 3. Production Security & Reliability Guarantees (`NODE_ENV=production`)
+- **`JWT_SECRET`**: Must be explicitly set to a strong secret ($\ge 16$ characters, non-placeholder). There is no hardcoded public fallback secret; the server refuses to start in production if `JWT_SECRET` is missing or weak.
+- **Storage-Mode Safety (`STORAGE_MODE=mongodb`)**: Once MongoDB storage mode is selected, the active storage mode is locked to `mongodb` independently of connection health. If MongoDB disconnects at runtime, the server **never** silently falls back to in-memory storage; requests fail safely with `503 Service Unavailable` until MongoDB reconnects.
+- **Payment Mode Distinction & Production Lock**:
+  - In `NODE_ENV=production`, simulated payments (`order_sim_*`, `pay_sim_*`, `sim_sig_*`) are **unconditionally disabled**, even if `ALLOW_SIMULATED_PAYMENTS=true` is set in the environment. Production strictly requires live/test Razorpay gateway orders and constant-time `HMAC-SHA256` signature verification.
+  - In non-production (`development` / `test`), demo simulation orders are explicitly marked with `paymentMode: 'DEMO_SIMULATION'`, `paymentProvider: 'SIMULATED_DEMO'`, `isSimulatedPayment: true`, and `razorpayPaymentId: null` so they are never falsely recorded or displayed as genuine Razorpay transactions.
+- **Database Seeding**: Non-production catalogue seeding uses `$setOnInsert` so existing products, stock counts, customers, orders, and reviews in MongoDB are never overwritten or deleted.
 
 ### 4. Run the Application & Automated Tests
 
@@ -176,12 +184,13 @@ npm start
 
 ## Automated Verification Suite (`npm test`)
 
-Running `npm test` executes `tests/smartkart2.test.js` (15 integration and security tests across 7 suites):
+Running `npm test` executes `tests/smartkart2.test.js` (17 integration and security tests across 7 suites):
 1. **Catalogue & Seed Integrity**: Verifies all 38 products across 6 categories and preserves original SKUs.
 2. **Shop by Goal Non-Destructive Workflow**: Confirms temporary proposals stay within budget, extract multi-quantity requests, include at most 1 cross-sell item, validate real catalogue IDs, and **never** mutate the persisted cart until `/api/ai/smart-shop/apply` is called.
 3. **Check My Cart Guardrail**: Confirms AI Cart Review rejects empty persisted carts even after generating a temporary bundle.
 4. **Review Source Separation & Verified Badges**: Confirms `VERIFIED_PURCHASE` vs `CUSTOMER_REVIEW` assignment, blocks duplicate reviews (`409`), enforces owner-only edits (`403`), and excludes `DEMO` reviews from `genuineRating`.
 5. **Smart Purchase Check & Product Swap**: Confirms cautionary items are flagged with in-stock alternatives, zero-review products synthesize spec-based reviews (never returning `INSUFFICIENT DATA`), and swapping preserves item quantity.
 6. **Discount Cap (15%), Cart-Hash Invalidation & Razorpay HMAC**: Confirms $>15\%$ requests are capped at $15\%$, cart mutations clear active discounts, Razorpay orders use exact paise (`finalTotal * 100`), invalid signatures fail (`400`) without clearing the cart, and valid `HMAC-SHA256` signatures complete the order.
-7. **Engineering Hardening (Replay Protection, Production Simulation Lock, JWT Secret Enforcement & Non-Destructive Seeding)**: Confirms `/orders/create-payment-order` never leaks `qrSignature`, duplicate payment verification or reused `razorpay_payment_id` is rejected with `409 Conflict` without double-decrementing stock, simulated signatures are rejected in production, `getJwtSecret()` throws in production when `JWT_SECRET` is missing/placeholder, and non-destructive seeding uses `$setOnInsert`.
+7. **Engineering Hardening (Replay Protection, Production Simulation Lock, Payment Mode Distinction, JWT Secret Enforcement & MongoDB Disconnect Safety)**: Confirms `/orders/create-payment-order` never leaks `qrSignature`, duplicate payment verification or reused payment IDs are rejected with `409 Conflict` without double-decrementing stock, `ALLOW_SIMULATED_PAYMENTS=true` never bypasses `NODE_ENV=production` safeguards, simulated demo payments are explicitly marked `DEMO_SIMULATION` (`razorpayPaymentId: null`), `getJwtSecret()` throws in production when `JWT_SECRET` is missing/placeholder, and `STORAGE_MODE=mongodb` never falls back to in-memory storage when MongoDB is disconnected (returning `503 Service Unavailable`).
+
 

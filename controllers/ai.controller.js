@@ -1,4 +1,5 @@
 const aiCommerceService = require('../services/aiCommerce.service');
+const { isDatabaseUnavailableError } = require('../config/storageMode');
 
 exports.createShoppingPlan = async (req, res) => {
   try {
@@ -13,6 +14,13 @@ exports.createShoppingPlan = async (req, res) => {
       proposal
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     const status = error.status || 500;
     res.status(status).json({
       success: false,
@@ -36,6 +44,13 @@ exports.applyShoppingProposal = async (req, res) => {
       activeDiscountOffer: result.activeDiscountOffer
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     const status = error.status || 500;
     res.status(status).json({
       success: false,
@@ -57,6 +72,13 @@ exports.negotiateDiscount = async (req, res) => {
       ...result
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     const status = error.status || 500;
     res.status(status).json({
       success: false,
@@ -78,6 +100,13 @@ exports.reviewCart = async (req, res) => {
       review: reviewResult
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     const status = error.status || 500;
     res.status(status).json({
       success: false,
@@ -102,6 +131,13 @@ exports.replaceCartProduct = async (req, res) => {
       activeDiscountOffer: result.activeDiscountOffer
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     const status = error.status || 500;
     res.status(status).json({
       success: false,

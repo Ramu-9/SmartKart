@@ -198,26 +198,52 @@ const OrderDetails = () => {
               <CreditCard size={20} />
               <h4>Payment Information</h4>
             </div>
-            <div className="info-pair">
-              <span className="info-label">Payment Method:</span>
-              <span className="info-value">Razorpay (Test Mode)</span>
-            </div>
-            <div className="info-pair">
-              <span className="info-label">Payment Status:</span>
-              <span className="badge badge-success">{order.paymentStatus}</span>
-            </div>
-            {order.razorpayPaymentId && (
-              <div className="info-pair">
-                <span className="info-label">Payment ID:</span>
-                <span className="info-value code-snippet">{order.razorpayPaymentId}</span>
-              </div>
-            )}
-            {order.razorpayOrderId && (
-              <div className="info-pair">
-                <span className="info-label">Razorpay Order:</span>
-                <span className="info-value code-snippet">{order.razorpayOrderId}</span>
-              </div>
-            )}
+            {(() => {
+              const isSimulated = Boolean(
+                order.isSimulatedPayment ||
+                  order.paymentMode === 'DEMO_SIMULATION' ||
+                  (String(order.razorpayOrderId || '').startsWith('order_sim_') &&
+                    !order.razorpayPaymentId)
+              );
+              return (
+                <>
+                  <div className="info-pair">
+                    <span className="info-label">Payment Method:</span>
+                    <span className="info-value">
+                      {isSimulated
+                        ? 'Simulated Demo Payment (Not Razorpay)'
+                        : 'Razorpay (Test Mode)'}
+                    </span>
+                  </div>
+                  <div className="info-pair">
+                    <span className="info-label">Payment Status:</span>
+                    <span className="badge badge-success">
+                      {isSimulated ? 'PAID (SIMULATED DEMO)' : order.paymentStatus}
+                    </span>
+                  </div>
+                  {order.razorpayPaymentId && !isSimulated && (
+                    <div className="info-pair">
+                      <span className="info-label">Razorpay Payment ID:</span>
+                      <span className="info-value code-snippet">{order.razorpayPaymentId}</span>
+                    </div>
+                  )}
+                  {order.simulatedPaymentId && isSimulated && (
+                    <div className="info-pair">
+                      <span className="info-label">Simulated Ref:</span>
+                      <span className="info-value code-snippet">{order.simulatedPaymentId}</span>
+                    </div>
+                  )}
+                  {order.razorpayOrderId && (
+                    <div className="info-pair">
+                      <span className="info-label">
+                        {isSimulated ? 'Demo Order Ref:' : 'Razorpay Order:'}
+                      </span>
+                      <span className="info-value code-snippet">{order.razorpayOrderId}</span>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </div>
       </div>

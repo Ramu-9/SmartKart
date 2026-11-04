@@ -17,9 +17,20 @@ const KNOWN_PLACEHOLDERS = new Set([
 if (process.env.NODE_ENV !== 'test') {
   for (const [k, v] of Object.entries(parsedEnv)) {
     const current = process.env[k];
-    if (!current || KNOWN_PLACEHOLDERS.has(current.trim())) {
+    const isPlaceholderUri =
+      k === 'MONGODB_URI' && typeof current === 'string' && /<[^>]+>/.test(current);
+    if (!current || KNOWN_PLACEHOLDERS.has(current.trim()) || isPlaceholderUri) {
       process.env[k] = v;
     }
+  }
+  // If container runtime pre-injected STORAGE_MODE=mongodb alongside a template placeholder MONGODB_URI
+  // in non-production development mode, honour .env's STORAGE_MODE=auto so dev server starts cleanly.
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    parsedEnv.STORAGE_MODE &&
+    (!process.env.MONGODB_URI || /<[^>]+>/.test(process.env.MONGODB_URI))
+  ) {
+    process.env.STORAGE_MODE = parsedEnv.STORAGE_MODE;
   }
 }
 
@@ -27,7 +38,12 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const mongoose = require('mongoose');
 const { validateJwtConfigOnStartup } = require('./utils/jwtConfig');
-const { initializeStorage } = require('./config/storageMode');
+const {
+  initializeStorage,
+  isMongoStorage,
+  isMongoConnected,
+  isDatabaseUnavailableError
+} = require('./config/storageMode');
 
 // Validate JWT configuration early
 validateJwtConfigOnStartup();
@@ -36,6 +52,39 @@ validateJwtConfigOnStartup();
 mongoose.set('bufferCommands', false);
 
 const app = express();
+
+// CORS configuration for same-origin and split frontend/backend deployments
+app.use((req, res, next) => {
+  const configuredOrigins = (process.env.CORS_ORIGIN || process.env.CLIENT_URL || '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  const requestOrigin = req.headers.origin;
+
+  if (requestOrigin) {
+    const allowOrigin =
+      configuredOrigins.length === 0
+        ? process.env.NODE_ENV !== 'production'
+          ? requestOrigin
+          : null
+        : configuredOrigins.includes('*') || configuredOrigins.includes(requestOrigin)
+        ? requestOrigin
+        : null;
+
+    if (allowOrigin) {
+      res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    }
+  }
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
 
 app.use(express.json({ limit: '256kb' }));
 app.use(cookieParser());
@@ -82,6 +131,21 @@ app.use((req, res, next) => {
   next();
 });
 
+// Strict storage-mode availability guard: never allow MongoDB mode to fall back to in-memory on disconnect
+app.use(
+  ['/customers', '/products', '/wishlist', '/cart', '/orders', '/reviews', '/api/ai'],
+  (req, res, next) => {
+    if (isMongoStorage() && !isMongoConnected()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
+    next();
+  }
+);
+
 // API routes
 app.use('/customers', require('./routes/customer.routes'));
 app.use('/products', require('./routes/product.routes'));
@@ -93,13 +157,13 @@ app.use('/api/ai', aiRateLimiter, require('./routes/ai.routes'));
 
 // Database offline graceful fallback error middleware
 app.use((err, req, res, next) => {
-  if (
-    err.name === 'MongooseError' ||
-    err.name === 'MongoNetworkError' ||
-    (err.message && err.message.includes('buffering timed out'))
-  ) {
+  if (isDatabaseUnavailableError(err)) {
     console.warn('[SmartKart] Database operation failed:', err.message);
-    return res.status(503).json({ error: 'Service temporarily unavailable (database offline)' });
+    return res.status(503).json({
+      success: false,
+      message: 'Service temporarily unavailable (database offline)',
+      error: 'Service temporarily unavailable (database offline)'
+    });
   }
   next(err);
 });
@@ -117,22 +181,35 @@ app.use((req, res) => {
   }
 });
 
-const PORT = Number(parsedEnv.PORT || process.env.PORT) || 3000;
+const resolvedPort =
+  parsedEnv.PORT ||
+  (process.env.PORT && process.env.PORT !== process.env.NGINX_PORT
+    ? process.env.PORT
+    : process.env.DEFAULT_APP_PORT) ||
+  3000;
+const PORT = Number(resolvedPort) || 3000;
 
 async function startServer() {
-  const indexPath = path.join(frontendDist, 'index.html');
-  if (!fs.existsSync(indexPath) && process.env.NODE_ENV !== 'test') {
-    try {
-      const { execSync } = require('child_process');
-      execSync('npm run build:frontend', { stdio: 'inherit', cwd: __dirname });
-    } catch (buildErr) {
-      console.warn('Frontend build check warning:', buildErr.message);
-    }
-  }
   await initializeStorage();
-  return app.listen(PORT, '0.0.0.0', () => {
+
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`SmartKart server running on http://0.0.0.0:${PORT}`);
   });
+
+  const indexPath = path.join(frontendDist, 'index.html');
+  if (!fs.existsSync(indexPath) && process.env.NODE_ENV !== 'test') {
+    const { spawn } = require('child_process');
+    const child = spawn('npm', ['run', 'build:frontend'], {
+      cwd: __dirname,
+      stdio: 'inherit',
+      shell: true
+    });
+    child.on('error', (buildErr) => {
+      console.warn('Frontend build check warning:', buildErr.message);
+    });
+  }
+
+  return server;
 }
 
 if (require.main === module) {

@@ -726,7 +726,7 @@ describe('SmartKart 2.0 — Intelligent Commerce Platform Automated Test Suite',
       assert.equal(reusePaymentIdRes.status, 409, 'Reusing an already processed razorpay_payment_id on another order must fail with 409');
     });
 
-    test('rejects simulated payment signatures (sim_sig_) when NODE_ENV is production and ALLOW_SIMULATED_PAYMENTS is not enabled', async () => {
+    test('rejects simulated payments even when ALLOW_SIMULATED_PAYMENTS=true in NODE_ENV=production, and enforces explicit DEMO_SIMULATION vs RAZORPAY separation', async () => {
       const { cookie } = await registerAndLogin('prodsim');
       const productId = '507f191e810c19729de860fe';
 
@@ -751,25 +751,78 @@ describe('SmartKart 2.0 — Intelligent Commerce Platform Automated Test Suite',
         }
       });
       assert.equal(orderRes.status, 200);
+      assert.equal(orderRes.data.paymentMode, 'DEMO_SIMULATION');
+      assert.equal(orderRes.data.paymentProvider, 'SIMULATED_DEMO');
+      assert.equal(orderRes.data.simulationMode, true);
       const { shopKartOrderId, razorpayOrderId } = orderRes.data;
 
       const prevNodeEnv = process.env.NODE_ENV;
       const prevAllowSim = process.env.ALLOW_SIMULATED_PAYMENTS;
       try {
+        // 1. Even with ALLOW_SIMULATED_PAYMENTS=true, NODE_ENV=production MUST block simulated verification
         process.env.NODE_ENV = 'production';
-        delete process.env.ALLOW_SIMULATED_PAYMENTS;
+        process.env.ALLOW_SIMULATED_PAYMENTS = 'true';
 
-        const simAttemptInProd = await apiRequest('/orders/verify-payment', {
+        const simAttemptInProdWithFlag = await apiRequest('/orders/verify-payment', {
           method: 'POST',
           cookie,
           body: {
             shopKartOrderId,
             razorpay_order_id: razorpayOrderId,
-            razorpay_payment_id: 'pay_sim_prod_attempt',
+            razorpay_payment_id: 'pay_sim_prod_attempt_1',
             razorpay_signature: `sim_sig_${razorpayOrderId}`
           }
         });
-        assert.equal(simAttemptInProd.status, 400, 'Simulated payment signature must be rejected in production');
+        assert.equal(
+          simAttemptInProdWithFlag.status,
+          400,
+          'ALLOW_SIMULATED_PAYMENTS=true must NEVER bypass NODE_ENV=production payment safeguards'
+        );
+
+        // 2. Even if an attacker signs a DEMO_SIMULATION order_sim_* with HMAC in production, it must be rejected
+        const forgedHmacForSimOrder = crypto
+          .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+          .update(`${razorpayOrderId}|pay_live_attempt_on_sim_order`)
+          .digest('hex');
+        const hmacOnSimOrderInProd = await apiRequest('/orders/verify-payment', {
+          method: 'POST',
+          cookie,
+          body: {
+            shopKartOrderId,
+            razorpay_order_id: razorpayOrderId,
+            razorpay_payment_id: 'pay_live_attempt_on_sim_order',
+            razorpay_signature: forgedHmacForSimOrder
+          }
+        });
+        assert.equal(
+          hmacOnSimOrderInProd.status,
+          400,
+          'Simulated demo orders cannot be verified as live Razorpay orders in production'
+        );
+
+        // 3. In non-production with ALLOW_SIMULATED_PAYMENTS=true, demo verification succeeds and explicitly labels DEMO_SIMULATION
+        process.env.NODE_ENV = 'development';
+        process.env.ALLOW_SIMULATED_PAYMENTS = 'true';
+
+        const validDemoVerify = await apiRequest('/orders/verify-payment', {
+          method: 'POST',
+          cookie,
+          body: {
+            shopKartOrderId,
+            razorpay_order_id: razorpayOrderId,
+            razorpay_payment_id: 'pay_sim_dev_verified_1',
+            razorpay_signature: `sim_sig_${razorpayOrderId}`
+          }
+        });
+        assert.equal(validDemoVerify.status, 200);
+        assert.equal(validDemoVerify.data.paymentMode, 'DEMO_SIMULATION');
+        assert.equal(validDemoVerify.data.paymentProvider, 'SIMULATED_DEMO');
+        assert.equal(validDemoVerify.data.isSimulatedPayment, true);
+        assert.equal(validDemoVerify.data.order.paymentMode, 'DEMO_SIMULATION');
+        assert.equal(validDemoVerify.data.order.paymentProvider, 'SIMULATED_DEMO');
+        assert.equal(validDemoVerify.data.order.isSimulatedPayment, true);
+        assert.equal(validDemoVerify.data.order.simulatedPaymentId, 'pay_sim_dev_verified_1');
+        assert.equal(validDemoVerify.data.order.razorpayPaymentId, null, 'Demo order must never store a fake razorpayPaymentId');
       } finally {
         process.env.NODE_ENV = prevNodeEnv;
         if (prevAllowSim === undefined) {
@@ -821,8 +874,14 @@ describe('SmartKart 2.0 — Intelligent Commerce Platform Automated Test Suite',
       }
     });
 
-    test('resolves explicit STORAGE_MODE deterministically and fails fast if STORAGE_MODE=mongodb has no MONGODB_URI', async () => {
-      const { initializeStorage, getActiveStorageMode, setActiveStorageModeForTest } = require('../config/storageMode');
+    test('resolves explicit STORAGE_MODE deterministically, never falls back to memory when mongodb disconnects, and returns 503 when MongoDB is unavailable', async () => {
+      const {
+        initializeStorage,
+        getActiveStorageMode,
+        isMongoStorage,
+        isMongoConnected,
+        setActiveStorageModeForTest
+      } = require('../config/storageMode');
       const prevStorageMode = process.env.STORAGE_MODE;
       const prevMongoUri = process.env.MONGODB_URI;
 
@@ -836,12 +895,46 @@ describe('SmartKart 2.0 — Intelligent Commerce Platform Automated Test Suite',
           /FATAL: STORAGE_MODE=mongodb requires a valid MONGODB_URI/,
           'STORAGE_MODE=mongodb without MONGODB_URI must fail fast'
         );
+        // Even after startup failure, STORAGE_MODE=mongodb must remain locked to mongodb
+        assert.equal(getActiveStorageMode(), 'mongodb');
+        assert.equal(isMongoStorage(), true, 'isMongoStorage() must remain true when STORAGE_MODE=mongodb even if disconnected');
+        assert.equal(isMongoConnected(), false, 'isMongoConnected() must reflect that mongoose is not connected');
+
+        // Verify that API requests while STORAGE_MODE=mongodb and MongoDB is disconnected fail safely with 503 Service Unavailable
+        // and NEVER silently read or write from inMemoryStore
+        const productsResWhenOffline = await apiRequest('/products');
+        assert.equal(
+          productsResWhenOffline.status,
+          503,
+          'GET /products must return 503 Service Unavailable when STORAGE_MODE=mongodb and MongoDB is disconnected'
+        );
+        assert.match(productsResWhenOffline.data.message, /Service temporarily unavailable/i);
+
+        const aiPlanWhenOffline = await apiRequest('/api/ai/smart-shop/plan', {
+          method: 'POST',
+          body: { prompt: 'Home gym under 15000' }
+        });
+        assert.equal(
+          aiPlanWhenOffline.status,
+          503,
+          'POST /api/ai/smart-shop/plan must return 503 when STORAGE_MODE=mongodb and MongoDB is disconnected'
+        );
+
+        // Verify invalid STORAGE_MODE fails fast
+        setActiveStorageModeForTest(null);
+        process.env.STORAGE_MODE = 'invalid_mode';
+        await assert.rejects(
+          async () => await initializeStorage(),
+          /FATAL: Invalid STORAGE_MODE/,
+          'Invalid STORAGE_MODE must throw a descriptive error'
+        );
 
         setActiveStorageModeForTest(null);
         process.env.STORAGE_MODE = 'memory';
         const mode = await initializeStorage();
         assert.equal(mode, 'memory');
         assert.equal(getActiveStorageMode(), 'memory');
+        assert.equal(isMongoStorage(), false);
       } finally {
         setActiveStorageModeForTest('memory');
         if (prevStorageMode === undefined) {
@@ -858,5 +951,6 @@ describe('SmartKart 2.0 — Intelligent Commerce Platform Automated Test Suite',
     });
   });
 });
+
 
 

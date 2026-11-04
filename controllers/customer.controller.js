@@ -2,7 +2,11 @@ const Customer = require('../models/customer.model');
 const bcrypt = require('bcryptjs');
 const inMemoryStore = require('../inMemoryStore');
 const generateToken = require('../utils/generateToken');
-const { isMongoStorage } = require('../config/storageMode');
+const {
+  isMongoStorage,
+  assertMongoAvailable,
+  isDatabaseUnavailableError
+} = require('../config/storageMode');
 
 const COOKIE_OPTIONS = {
   httpOnly: true,
@@ -26,6 +30,7 @@ exports.register = async (req, res) => {
 
     let existingCustomer = null;
     if (isMongoStorage()) {
+      assertMongoAvailable();
       existingCustomer = await Customer.findOne({ email: normalizedEmail });
     } else {
       existingCustomer = inMemoryStore.findCustomerByEmail(normalizedEmail);
@@ -38,6 +43,7 @@ exports.register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 10);
     let customer;
     if (isMongoStorage()) {
+      assertMongoAvailable();
       customer = await Customer.create({
         fullName,
         email: normalizedEmail,
@@ -71,6 +77,13 @@ exports.register = async (req, res) => {
       }
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     if (error.code === 11000) {
       return res.status(409).json({ message: 'Email already registered' });
     }
@@ -90,6 +103,7 @@ exports.login = async (req, res) => {
 
     let customer = null;
     if (isMongoStorage()) {
+      assertMongoAvailable();
       customer = await Customer.findOne({ email: normalizedEmail });
     } else {
       customer = inMemoryStore.findCustomerByEmail(normalizedEmail);
@@ -118,6 +132,13 @@ exports.login = async (req, res) => {
       }
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 };

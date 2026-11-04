@@ -2,7 +2,11 @@ const Customer = require('../models/customer.model');
 const Product = require('../models/product.model');
 const inMemoryStore = require('../inMemoryStore');
 const aiCommerceService = require('../services/aiCommerce.service');
-const { isMongoStorage } = require('../config/storageMode');
+const {
+  isMongoStorage,
+  assertMongoAvailable,
+  isDatabaseUnavailableError
+} = require('../config/storageMode');
 
 const getProductIdString = (productRef) => {
   if (!productRef) return '';
@@ -39,6 +43,8 @@ exports.addToCart = async (req, res) => {
         return res.status(400).json({ success: false, message: err.message });
       }
     }
+
+    assertMongoAvailable();
 
     const product = await Product.findById(productId);
     if (!product) {
@@ -97,6 +103,13 @@ exports.addToCart = async (req, res) => {
       activeDiscountOffer: null
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     console.error('Error adding to cart:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
@@ -116,6 +129,8 @@ exports.getCart = async (req, res) => {
       });
     }
 
+    assertMongoAvailable();
+
     const user = await Customer.findById(userId).populate({
       path: 'cart.product',
       select: 'sku name brand price category image stock description tags useCase attributes discountEligible'
@@ -134,6 +149,13 @@ exports.getCart = async (req, res) => {
       activeDiscountOffer: discountState.activeOffer
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     console.error('Error getting cart:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
@@ -173,6 +195,8 @@ exports.updateQuantity = async (req, res) => {
         return res.status(400).json({ success: false, message: err.message });
       }
     }
+
+    assertMongoAvailable();
 
     const product = await Product.findById(productId);
     if (!product) {
@@ -215,6 +239,13 @@ exports.updateQuantity = async (req, res) => {
       activeDiscountOffer: null
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     console.error('Error updating cart quantity:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
@@ -247,6 +278,8 @@ exports.removeFromCart = async (req, res) => {
       }
     }
 
+    assertMongoAvailable();
+
     const user = await Customer.findById(userId);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
@@ -278,6 +311,13 @@ exports.removeFromCart = async (req, res) => {
       activeDiscountOffer: null
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     console.error('Error removing from cart:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
@@ -297,6 +337,8 @@ exports.removeDiscount = async (req, res) => {
       });
     }
 
+    assertMongoAvailable();
+
     const user = await Customer.findById(userId);
     if (user) {
       user.activeDiscountOffer = undefined;
@@ -308,8 +350,14 @@ exports.removeDiscount = async (req, res) => {
       activeDiscountOffer: null
     });
   } catch (error) {
+    if (isDatabaseUnavailableError(error)) {
+      return res.status(503).json({
+        success: false,
+        message: 'Service temporarily unavailable (database offline)',
+        error: 'Service temporarily unavailable (database offline)'
+      });
+    }
     console.error('Error removing discount:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
-
